@@ -27,20 +27,28 @@ jobs:
           java-version: '21'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
       - name: Accept Android SDK licenses & install SDK 36.1
         shell: bash
         run: |
           set +o pipefail
-          yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager --install "platform-tools" "build-tools;36.0.0" "platforms;android-36.1"
-          if [ -d "${ANDROID_HOME}/platforms/android-36.1" ] && [ ! -e "${ANDROID_HOME}/platforms/android-36" ]; then
-            ln -s "${ANDROID_HOME}/platforms/android-36.1" "${ANDROID_HOME}/platforms/android-36"
+          SDKMANAGER="$(command -v sdkmanager || echo "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager")"
+          echo "Using sdkmanager: ${SDKMANAGER}"
+          yes | "${SDKMANAGER}" --licenses >/dev/null 2>&1 || true
+          "${SDKMANAGER}" --install "cmdline-tools;latest" || true
+          if [ -x "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
           fi
+          yes | "${SDKMANAGER}" --licenses >/dev/null 2>&1 || true
+          "${SDKMANAGER}" --install "platform-tools" "build-tools;36.0.0" || true
+          "${SDKMANAGER}" --install "platforms;android-36.1" || "${SDKMANAGER}" --install "platforms;android-36" || true
+          yes | "${SDKMANAGER}" --licenses >/dev/null 2>&1 || true
 
       - name: Set up Gradle 9.3.1
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '9.3.1'
 
@@ -48,7 +56,7 @@ jobs:
         shell: bash
         run: |
           if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
-            tr -d '\r\n ' < debug.keystore.base64 | base64 -d > debug.keystore
+            (tr -d '\r\n ' < debug.keystore.base64 | base64 -d > debug.keystore) || rm -f debug.keystore
           fi
           if [ ! -s debug.keystore ]; then
             echo "Generating fallback Android debug keystore..."
