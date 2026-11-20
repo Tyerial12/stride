@@ -80,9 +80,33 @@ jobs:
           fi
 
       - name: Build Solstride Debug APK
+        shell: bash
         env:
-          GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+          GRADLE_OPTS: "-Xmx512m"
+        run: |
+          set -o pipefail
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --no-configuration-cache \
+            --no-parallel \
+            --max-workers=2 \
+            --console=plain \
+            --stacktrace \
+            -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8" \
+            2>&1 | tee gradle-build.log
+
+      - name: Print Gradle failure summary if build failed
+        if: failure()
+        shell: bash
+        run: |
+          echo "### Gradle Build Failure Details" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f gradle-build.log ]; then
+            grep -n -C 5 -E "FAILURE:|What went wrong:|OutOfMemoryError|Execution failed for task|e: file://" gradle-build.log | tail -n 80 >> "$GITHUB_STEP_SUMMARY" || tail -n 80 gradle-build.log >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "gradle-build.log not found." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Prepare versioned APK filename
         id: meta
