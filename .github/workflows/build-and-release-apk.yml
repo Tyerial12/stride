@@ -1,0 +1,78 @@
+name: Build & Release Solstride APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Accept Android SDK licenses & install SDK 36.1
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36.1" "build-tools;36.0.0"
+
+      - name: Prepare signing keystore and environment file
+        run: |
+          if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          fi
+          if [ ! -f .env ] && [ -f .env.example ]; then
+            cp .env.example .env
+          fi
+
+      - name: Build Solstride Debug APK
+        run: gradle :app:assembleDebug --no-daemon
+
+      - name: Prepare versioned APK filename
+        id: meta
+        run: |
+          VERSION_NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+          VERSION_CODE=$(grep -E 'versionCode\s*=' app/build.gradle.kts | head -n 1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+          VERSION_NAME="${VERSION_NAME:-25.0}"
+          VERSION_CODE="${VERSION_CODE:-25}"
+          APK_NAME="Solstride-v${VERSION_NAME}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "${APK_NAME}"
+          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+          echo "apk_name=${APK_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Solstride-v${{ steps.meta.outputs.version_name }}-apk
+          path: ${{ steps.meta.outputs.apk_name }}
+
+      - name: Publish GitHub Release with APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.meta.outputs.version_name }}
+          name: Solstride v${{ steps.meta.outputs.version_name }} (Build ${{ steps.meta.outputs.version_code }})
+          body: |
+            Automated Solstride Android APK build (`com.aistudio.solstride.kxmrvq`, version `${{ steps.meta.outputs.version_name }}`, build `${{ steps.meta.outputs.version_code }}`).
+          files: ${{ steps.meta.outputs.apk_name }}
+          make_latest: true
