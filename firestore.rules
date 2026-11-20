@@ -1,0 +1,372 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Hardened Global Primitives ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidHeroClass(cls) {
+      return cls is string && cls in ['VANGUARD', 'STRIDER', 'SUNBLADE'];
+    }
+
+    function isValidSlot(slot) {
+      return slot is string && slot in ['WEAPON', 'ARMOR', 'RELIC', 'CONSUMABLE'];
+    }
+
+    function isValidRarity(rarity) {
+      return rarity is string && rarity in ['COMMON', 'RARE', 'EPIC', 'SOLAR', 'ULTRA_RARE'];
+    }
+
+    function isValidPerkType(perk) {
+      return perk is string && perk in [
+        'NONE', 'CRIT_CHANCE', 'ARMOR_PIERCE', 'LIFESTEAL', 'SOLAR_SURGE',
+        'DAMAGE_REDUCTION', 'THORNS', 'EXPEDITION_WARD', 'TURN_REGEN'
+      ];
+    }
+
+    function isValidChestTier(tier) {
+      return tier is string && tier in [
+        'HIGHLAND', 'BOSS_VAULT', 'EXPEDITION', 'SPIRE_SOVEREIGN'
+      ];
+    }
+
+    function isValidPetType(petType) {
+      return petType is string && petType in [
+        'SUNFOX_KIT', 'AEGIS_SCARAB', 'DUNE_FALCON',
+        'CINDER_LYNX', 'OASIS_TORTOISE', 'SOLAR_PHOENIX'
+      ];
+    }
+
+    function isValidPetWeaponId(weaponId) {
+      return weaponId is string && weaponId in [
+        '', 'pet_wpn_bronze_fang', 'pet_wpn_sunsteel_talon', 'pet_wpn_zenith_spire'
+      ];
+    }
+
+    function isValidPetArmorId(armorId) {
+      return armorId is string && armorId in [
+        '', 'pet_arm_desert_harness', 'pet_arm_obsidian_barding', 'pet_arm_aegis_mantle'
+      ];
+    }
+
+    function intBound(v, lo, hi) {
+      return v is int && v >= lo && v <= hi;
+    }
+
+    function optInt(d, k, lo, hi) {
+      return !(k in d) || (d[k] is int && d[k] >= lo && d[k] <= hi);
+    }
+
+    // --- Schema Validation Helpers (Anti-Update-Gap & Backward-Compatible Migration) ---
+    function isValidHeroProfile(d) {
+      return d.userId == request.auth.uid &&
+             d.displayName is string && d.displayName.size() >= 1 && d.displayName.size() <= 50 &&
+             d.heroClass in ['VANGUARD', 'STRIDER', 'SUNBLADE'] &&
+             d.level is int && d.level >= 1 && d.level <= 999 &&
+             d.xp is int && d.xp >= 0 &&
+             d.xpToNextLevel is int && d.xpToNextLevel >= 1 &&
+             d.might is int && d.might >= 1 &&
+             d.vigor is int && d.vigor >= 1 &&
+             d.endurance is int && d.endurance >= 1 &&
+             d.unspentPoints is int && d.unspentPoints >= 0 &&
+             d.currentHp is int && d.currentHp >= 0 &&
+             d.maxHp is int && d.maxHp >= 1 &&
+             d.strideEnergy is int && d.strideEnergy >= 0 &&
+             d.maxStrideEnergy is int && d.maxStrideEnergy >= 1 &&
+             d.encounterProgress is int && d.encounterProgress >= 0 && d.encounterProgress <= 100 &&
+             d.sunshards is int && d.sunshards >= 0 &&
+             d.totalSteps is int && d.totalSteps >= 0 &&
+             d.weeklySteps is int && d.weeklySteps >= 0 &&
+             d.weekKey is string && d.weekKey.size() <= 20 &&
+             d.bossesDefeated is int && d.bossesDefeated >= 0 &&
+             d.heroPower is int && d.heroPower >= 1 &&
+             d.createdAt is timestamp && d.createdAt <= request.time &&
+             d.updatedAt is timestamp && d.updatedAt <= request.time &&
+             d.get('solCoins', 0) >= 0 &&
+             d.get('trueBossWins', 0) >= 0 &&
+             d.get('equippedPetId', '') in ['', 'SUNFOX_KIT', 'AEGIS_SCARAB', 'DUNE_FALCON', 'CINDER_LYNX', 'OASIS_TORTOISE', 'SOLAR_PHOENIX'] &&
+             d.get('expeditionsCompleted', 0) >= 0 &&
+             d.get('expeditionsFailed', 0) >= 0 &&
+             d.get('activeExpeditionStartMs', 0) >= 0 &&
+             d.get('activeExpeditionDurationMin', 0) >= 0 && d.get('activeExpeditionDurationMin', 0) <= 1380 &&
+             d.get('activeExpeditionEndMs', 0) >= 0 &&
+             d.get('currentRealm', 1) >= 1 && d.get('currentRealm', 1) <= 5 &&
+             d.get('realmStage', 1) >= 1 && d.get('realmStage', 1) <= 5 &&
+             d.get('highestRealmCleared', 0) >= 0 && d.get('highestRealmCleared', 0) <= 5 &&
+             d.get('currentSpireFloor', 1) >= 1 &&
+             d.get('highestSpireFloor', 0) >= 0 &&
+             d.get('prestigeLevel', 0) >= 0 && d.get('prestigeLevel', 0) <= 99 &&
+             d.get('skillRanks', '0,0,0,0,0,0,0,0,0').matches('^[0-5](,[0-5]){8}$') &&
+             d.get('dailyQuestDateKey', '').size() <= 20 &&
+             d.get('dailyBattlesWon', 0) >= 0 &&
+             d.get('dailyExpeditionsDone', 0) >= 0 &&
+             d.get('dailyChestsOpened', 0) >= 0 &&
+             d.get('claimedQuestIds', []).size() <= 40 &&
+             d.get('chestsOpenedTotal', 0) >= 0;
+    }
+
+    function isValidInventoryItem(data) {
+      let d = data;
+      return isValidId(d.userId) &&
+             d.userId == request.auth.uid &&
+             d.name is string && d.name.size() >= 1 && d.name.size() <= 60 &&
+             isValidSlot(d.slot) &&
+             isValidRarity(d.rarity) &&
+             intBound(d.attackBonus, 0, 9999) &&
+             intBound(d.defenseBonus, 0, 9999) &&
+             intBound(d.hpBonus, 0, 9999) &&
+             intBound(d.energyBonus, 0, 999) &&
+             intBound(d.healAmount, 0, 99999) &&
+             intBound(d.upgradeLevel, 0, 99) &&
+             intBound(d.quantity, 1, 999) &&
+             d.equipped is bool &&
+             d.description is string && d.description.size() <= 180 &&
+             (!('perkType' in d) || isValidPerkType(d.perkType)) &&
+             optInt(d, 'perkValue', 0, 100) &&
+             d.createdAt is timestamp && d.createdAt <= request.time &&
+             d.updatedAt is timestamp && d.updatedAt <= request.time;
+    }
+
+    function isValidLootChest(data) {
+      let d = data;
+      return isValidId(d.userId) &&
+             d.userId == request.auth.uid &&
+             isValidChestTier(d.chestTier) &&
+             d.sourceLabel is string && d.sourceLabel.size() >= 1 && d.sourceLabel.size() <= 80 &&
+             intBound(d.heroLevelSnapshot, 1, 999) &&
+             intBound(d.durationMinutes, 0, 1380) &&
+             intBound(d.ultraRareChancePct, 0, 100) &&
+             d.createdAt is timestamp && d.createdAt <= request.time &&
+             d.updatedAt is timestamp && d.updatedAt <= request.time;
+    }
+
+    function isValidOwnedPet(data) {
+      let d = data;
+      return isValidId(d.userId) &&
+             d.userId == request.auth.uid &&
+             isValidPetType(d.petType) &&
+             intBound(d.level, 1, 50) &&
+             intBound(d.xp, 0, 1000000) &&
+             intBound(d.xpToNextLevel, 1, 1000000) &&
+             isValidPetWeaponId(d.equippedWeaponId) &&
+             isValidPetArmorId(d.equippedArmorId) &&
+             d.createdAt is timestamp && d.createdAt <= request.time &&
+             d.updatedAt is timestamp && d.updatedAt <= request.time;
+    }
+
+    function isValidLeaderboardEntry(data) {
+      let d = data;
+      return isValidId(d.userId) &&
+             d.userId == request.auth.uid &&
+             d.displayName is string && d.displayName.size() >= 1 && d.displayName.size() <= 50 &&
+             isValidHeroClass(d.heroClass) &&
+             intBound(d.heroLevel, 1, 999) &&
+             intBound(d.heroPower, 1, 10000000) &&
+             intBound(d.weeklySteps, 0, 10000000) &&
+             d.weekKey is string && d.weekKey.size() >= 4 && d.weekKey.size() <= 20 &&
+             intBound(d.bossesDefeated, 0, 1000000) &&
+             optInt(d, 'prestigeLevel', 0, 99) &&
+             optInt(d, 'highestSpireFloor', 0, 9999) &&
+             d.publicVisible is bool &&
+             d.createdAt is timestamp && d.createdAt <= request.time &&
+             d.updatedAt is timestamp && d.updatedAt <= request.time;
+    }
+
+    // --- Collection: /users/{userId} ---
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       request.resource.data.keys().hasOnly([
+                         'userId', 'displayName', 'heroClass', 'level', 'xp', 'xpToNextLevel',
+                         'might', 'vigor', 'endurance', 'unspentPoints', 'currentHp', 'maxHp',
+                         'strideEnergy', 'maxStrideEnergy', 'encounterProgress', 'sunshards',
+                         'solCoins', 'totalSteps', 'weeklySteps', 'weekKey', 'bossesDefeated',
+                         'trueBossWins', 'heroPower', 'equippedPetId', 'expeditionsCompleted',
+                         'expeditionsFailed', 'activeExpeditionStartMs', 'activeExpeditionDurationMin',
+                         'activeExpeditionEndMs', 'currentRealm', 'realmStage', 'highestRealmCleared',
+                         'currentSpireFloor', 'highestSpireFloor', 'prestigeLevel', 'skillRanks',
+                         'dailyQuestDateKey', 'dailyBattlesWon', 'dailyExpeditionsDone',
+                         'dailyChestsOpened', 'claimedQuestIds', 'chestsOpenedTotal',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidHeroProfile(request.resource.data);
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       request.resource.data.userId == resource.data.userId &&
+                       request.resource.data.createdAt == resource.data.createdAt &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                         'displayName', 'heroClass', 'level', 'xp', 'xpToNextLevel',
+                         'might', 'vigor', 'endurance', 'unspentPoints', 'currentHp', 'maxHp',
+                         'strideEnergy', 'maxStrideEnergy', 'encounterProgress', 'sunshards',
+                         'solCoins', 'totalSteps', 'weeklySteps', 'weekKey', 'bossesDefeated',
+                         'trueBossWins', 'heroPower', 'equippedPetId', 'expeditionsCompleted',
+                         'expeditionsFailed', 'activeExpeditionStartMs', 'activeExpeditionDurationMin',
+                         'activeExpeditionEndMs', 'currentRealm', 'realmStage', 'highestRealmCleared',
+                         'currentSpireFloor', 'highestSpireFloor', 'prestigeLevel', 'skillRanks',
+                         'dailyQuestDateKey', 'dailyBattlesWon', 'dailyExpeditionsDone',
+                         'dailyChestsOpened', 'claimedQuestIds', 'chestsOpenedTotal',
+                         'updatedAt'
+                       ]) &&
+                       isValidHeroProfile(request.resource.data);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+      // --- Subcollection: /users/{userId}/inventory/{itemId} ---
+      match /inventory/{itemId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(itemId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(itemId) &&
+                         request.auth.uid == userId &&
+                         incoming().keys().hasAll([
+                           'userId', 'name', 'slot', 'rarity', 'attackBonus', 'defenseBonus',
+                           'hpBonus', 'energyBonus', 'healAmount', 'upgradeLevel', 'quantity',
+                           'equipped', 'description', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'name', 'slot', 'rarity', 'attackBonus', 'defenseBonus',
+                           'hpBonus', 'energyBonus', 'healAmount', 'upgradeLevel', 'quantity',
+                           'equipped', 'description', 'perkType', 'perkValue',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidInventoryItem(incoming());
+
+        allow update: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(itemId) &&
+                         isValidInventoryItem(incoming()) &&
+                         request.auth.uid == userId &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'attackBonus', 'defenseBonus', 'hpBonus', 'energyBonus',
+                           'upgradeLevel', 'quantity', 'equipped', 'perkValue', 'updatedAt'
+                         ]);
+
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(itemId) && request.auth.uid == userId;
+      }
+
+      // --- Subcollection: /users/{userId}/chests/{chestId} ---
+      match /chests/{chestId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(chestId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(chestId) &&
+                         request.auth.uid == userId &&
+                         incoming().keys().hasAll([
+                           'userId', 'chestTier', 'sourceLabel', 'heroLevelSnapshot',
+                           'durationMinutes', 'ultraRareChancePct', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'chestTier', 'sourceLabel', 'heroLevelSnapshot',
+                           'durationMinutes', 'ultraRareChancePct', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidLootChest(incoming());
+
+        allow update: if false;
+
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(chestId) && request.auth.uid == userId;
+      }
+
+      // --- Subcollection: /users/{userId}/pets/{petId} ---
+      match /pets/{petId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(petId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(petId) &&
+                         request.auth.uid == userId &&
+                         petId == incoming().petType &&
+                         incoming().keys().hasAll([
+                           'userId', 'petType', 'level', 'xp', 'xpToNextLevel',
+                           'equippedWeaponId', 'equippedArmorId', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'petType', 'level', 'xp', 'xpToNextLevel',
+                           'equippedWeaponId', 'equippedArmorId', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidOwnedPet(incoming());
+
+        allow update: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(petId) &&
+                         isValidOwnedPet(incoming()) &&
+                         request.auth.uid == userId &&
+                         incoming().userId == existing().userId &&
+                         incoming().petType == existing().petType &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'level', 'xp', 'xpToNextLevel',
+                           'equippedWeaponId', 'equippedArmorId', 'updatedAt'
+                         ]);
+
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(petId) && request.auth.uid == userId;
+      }
+    }
+
+    // --- Collection: /leaderboard/{userId} (Public Non-PII Competitive Standings) ---
+    match /leaderboard/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (resource.data.publicVisible == true || request.auth.uid == userId);
+      allow list: if isSignedIn() && resource.data.publicVisible == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().keys().hasAll([
+                         'userId', 'displayName', 'heroClass', 'heroLevel', 'heroPower',
+                         'weeklySteps', 'weekKey', 'bossesDefeated', 'publicVisible',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'displayName', 'heroClass', 'heroLevel', 'heroPower',
+                         'weeklySteps', 'weekKey', 'bossesDefeated', 'prestigeLevel',
+                         'highestSpireFloor', 'publicVisible', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidLeaderboardEntry(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidLeaderboardEntry(incoming()) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'displayName', 'heroClass', 'heroLevel', 'heroPower',
+                         'weeklySteps', 'weekKey', 'bossesDefeated', 'prestigeLevel',
+                         'highestSpireFloor', 'publicVisible', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+  }
+}

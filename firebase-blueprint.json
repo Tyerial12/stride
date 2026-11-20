@@ -1,0 +1,185 @@
+{
+  "entities": {
+    "HeroProfile": {
+      "title": "HeroProfile",
+      "description": "Durable RPG character stats, step energy, Sol Coins, progression (Realms, Spire, Skill Tree, Quests, Prestige), companion reference, and timed expedition state for an authenticated Solstride player.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Authenticated Firebase UID owning this hero profile." },
+        "displayName": { "type": "string", "description": "Hero display name shown in hub and leaderboard." },
+        "heroClass": { "type": "string", "enum": ["VANGUARD", "STRIDER", "SUNBLADE"], "description": "Chosen tactical archetype." },
+        "level": { "type": "integer", "description": "Current hero level." },
+        "xp": { "type": "integer", "description": "Experience points within the current level." },
+        "xpToNextLevel": { "type": "integer", "description": "Experience required to reach the next level." },
+        "might": { "type": "integer", "description": "Might attribute increasing attack power." },
+        "vigor": { "type": "integer", "description": "Vigor attribute increasing max HP and defense." },
+        "endurance": { "type": "integer", "description": "Endurance attribute increasing max Stride Energy." },
+        "unspentPoints": { "type": "integer", "description": "Unallocated Mastery Points earned on level-up." },
+        "currentHp": { "type": "integer", "description": "Current hit points." },
+        "maxHp": { "type": "integer", "description": "Maximum hit points." },
+        "strideEnergy": { "type": "integer", "description": "Solar Stride Energy charged by real-world steps." },
+        "maxStrideEnergy": { "type": "integer", "description": "Maximum Solar Stride Energy capacity." },
+        "encounterProgress": { "type": "integer", "description": "Encounter gauge percentage from 0 to 100." },
+        "sunshards": { "type": "integer", "description": "Upgrade currency earned from battles and salvage." },
+        "solCoins": { "type": "integer", "description": "Boss-exclusive currency (+10 per won boss battle) used for Camp Heal, Pets, and Pet Shop." },
+        "totalSteps": { "type": "integer", "description": "Lifetime tracked steps across smart watches and fitness trackers." },
+        "weeklySteps": { "type": "integer", "description": "Current ISO week step count." },
+        "weekKey": { "type": "string", "description": "ISO week identifier such as 2026-W47." },
+        "bossesDefeated": { "type": "integer", "description": "Total tactical battles won." },
+        "trueBossWins": { "type": "integer", "description": "Total Boss battles won (Highland, Realm Guardian, and Spire Warden bosses)." },
+        "heroPower": { "type": "integer", "description": "Composite tactical power score derived from level, stats, equipped gear, skills, prestige, and pet." },
+        "equippedPetId": { "type": "string", "description": "PetType ID of the single currently equipped companion, or empty string if none." },
+        "expeditionsCompleted": { "type": "integer", "description": "Total timed expeditions successfully completed." },
+        "expeditionsFailed": { "type": "integer", "description": "Total timed expeditions failed." },
+        "activeExpeditionStartMs": { "type": "integer", "description": "Epoch ms when the current timed expedition started (0 when idle)." },
+        "activeExpeditionDurationMin": { "type": "integer", "description": "Duration in minutes (5..1380) of the active timed expedition (0 when idle)." },
+        "activeExpeditionEndMs": { "type": "integer", "description": "Epoch ms when the active timed expedition completes (0 when idle)." },
+        "currentRealm": { "type": "integer", "description": "Current Realm Chapter (1..5)." },
+        "realmStage": { "type": "integer", "description": "Current stage within the active Realm Chapter (1..5; stage 5 is the Realm Guardian Boss)." },
+        "highestRealmCleared": { "type": "integer", "description": "Highest Realm Chapter fully conquered (0..5)." },
+        "currentSpireFloor": { "type": "integer", "description": "Current floor reached in the Endless Spire Gauntlet (1..9999)." },
+        "highestSpireFloor": { "type": "integer", "description": "All-time highest Endless Spire floor cleared (0..9999)." },
+        "prestigeLevel": { "type": "integer", "description": "Solar Ascension Prestige Rebirth rank (0..99)." },
+        "skillRanks": { "type": "string", "description": "Compact 9-node Class Skill Tree rank vector (e.g. 0,0,0,0,0,0,0,0,0)." },
+        "dailyQuestDateKey": { "type": "string", "description": "Calendar day key (YYYY-MM-DD) for daily quest counter resets." },
+        "dailyBattlesWon": { "type": "integer", "description": "Battles won today for daily quests." },
+        "dailyExpeditionsDone": { "type": "integer", "description": "Expeditions resolved today for daily quests." },
+        "dailyChestsOpened": { "type": "integer", "description": "Loot chests opened today for daily quests." },
+        "claimedQuestIds": { "type": "array", "description": "Bounded list of claimed daily/weekly/milestone quest IDs (max 40)." },
+        "chestsOpenedTotal": { "type": "integer", "description": "Lifetime count of loot chests cracked open." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp() on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp() on each update." }
+      },
+      "required": [
+        "userId", "displayName", "heroClass", "level", "xp", "xpToNextLevel",
+        "might", "vigor", "endurance", "unspentPoints", "currentHp", "maxHp",
+        "strideEnergy", "maxStrideEnergy", "encounterProgress", "sunshards",
+        "totalSteps", "weeklySteps", "weekKey", "bossesDefeated", "heroPower",
+        "createdAt", "updatedAt"
+      ]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Equippable weapon, armor, relic (with combat/expedition perks), or combat consumable owned by a player.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Authenticated Firebase UID owning this item." },
+        "name": { "type": "string", "description": "Item display title." },
+        "slot": { "type": "string", "enum": ["WEAPON", "ARMOR", "RELIC", "CONSUMABLE"], "description": "Equipment or consumable category." },
+        "rarity": { "type": "string", "enum": ["COMMON", "RARE", "EPIC", "SOLAR", "ULTRA_RARE"], "description": "Rarity tier including expedition Ultra Rare drops." },
+        "attackBonus": { "type": "integer", "description": "Attack stat bonus when equipped." },
+        "defenseBonus": { "type": "integer", "description": "Defense stat bonus when equipped." },
+        "hpBonus": { "type": "integer", "description": "Max HP bonus when equipped." },
+        "energyBonus": { "type": "integer", "description": "Max Stride Energy bonus when equipped." },
+        "healAmount": { "type": "integer", "description": "HP restored when consumed." },
+        "upgradeLevel": { "type": "integer", "description": "Forge upgrade rank." },
+        "quantity": { "type": "integer", "description": "Stack count." },
+        "equipped": { "type": "boolean", "description": "Whether the gear piece is currently equipped." },
+        "description": { "type": "string", "description": "Concise item flavor or tactical effect summary." },
+        "perkType": {
+          "type": "string",
+          "enum": ["NONE", "CRIT_CHANCE", "ARMOR_PIERCE", "LIFESTEAL", "SOLAR_SURGE", "DAMAGE_REDUCTION", "THORNS", "EXPEDITION_WARD", "TURN_REGEN"],
+          "description": "Special passive combat or expedition survival perk on weapons, armor, and relics."
+        },
+        "perkValue": { "type": "integer", "description": "Numeric percentage or magnitude of the gear perk (0..100)." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp() on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp() on update." }
+      },
+      "required": [
+        "userId", "name", "slot", "rarity", "attackBonus", "defenseBonus",
+        "hpBonus", "energyBonus", "healAmount", "upgradeLevel", "quantity",
+        "equipped", "description", "createdAt", "updatedAt"
+      ]
+    },
+    "LootChest": {
+      "title": "LootChest",
+      "description": "Sealed treasure chest earned from battles, expeditions, Spire milestones, or quests that must be interactively tapped to open for gear and Ultra Rare relics.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Authenticated Firebase UID owning this chest." },
+        "chestTier": { "type": "string", "enum": ["HIGHLAND", "BOSS_VAULT", "EXPEDITION", "SPIRE_SOVEREIGN"], "description": "Chest quality tier determining visual styling and loot table." },
+        "sourceLabel": { "type": "string", "description": "Human-readable origin label such as Zenith Odyssey (23h) or Realm 2 Guardian." },
+        "heroLevelSnapshot": { "type": "integer", "description": "Hero level when the chest was earned." },
+        "durationMinutes": { "type": "integer", "description": "Expedition duration in minutes (0 for non-expedition chests, 5..1380 for expedition chests)." },
+        "ultraRareChancePct": { "type": "integer", "description": "Exact percentage chance (0..100) to roll an Ultra Rare relic when opened." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp() when chest was earned." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp() when chest was earned." }
+      },
+      "required": [
+        "userId", "chestTier", "sourceLabel", "heroLevelSnapshot",
+        "durationMinutes", "ultraRareChancePct", "createdAt", "updatedAt"
+      ]
+    },
+    "OwnedPet": {
+      "title": "OwnedPet",
+      "description": "Companion pet unlocked and purchased with Sol Coins, tracking its level, XP, and equipped pet weapon/armor.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Authenticated Firebase UID owning this pet." },
+        "petType": {
+          "type": "string",
+          "enum": ["SUNFOX_KIT", "AEGIS_SCARAB", "DUNE_FALCON", "CINDER_LYNX", "OASIS_TORTOISE", "SOLAR_PHOENIX"],
+          "description": "Unique companion archetype identifier."
+        },
+        "level": { "type": "integer", "description": "Pet level increased by feeding Pet Food (1..50)." },
+        "xp": { "type": "integer", "description": "Current pet XP within the current pet level." },
+        "xpToNextLevel": { "type": "integer", "description": "Pet XP needed to reach the next pet level." },
+        "equippedWeaponId": { "type": "string", "description": "Shop weapon ID equipped on this pet, or empty string." },
+        "equippedArmorId": { "type": "string", "description": "Shop armor ID equipped on this pet, or empty string." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp() on adoption." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp() on update." }
+      },
+      "required": [
+        "userId", "petType", "level", "xp", "xpToNextLevel",
+        "equippedWeaponId", "equippedArmorId", "createdAt", "updatedAt"
+      ]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Public competitive leaderboard standing containing non-PII hero stats, Prestige rank, Spire record, and weekly step totals.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Authenticated Firebase UID matching document ID." },
+        "displayName": { "type": "string", "description": "Public hero callsign." },
+        "heroClass": { "type": "string", "enum": ["VANGUARD", "STRIDER", "SUNBLADE"], "description": "Hero class badge." },
+        "heroLevel": { "type": "integer", "description": "Current hero level." },
+        "heroPower": { "type": "integer", "description": "Current composite Hero Power rating." },
+        "weeklySteps": { "type": "integer", "description": "Steps walked during weekKey." },
+        "weekKey": { "type": "string", "description": "ISO week key for weekly step rankings." },
+        "bossesDefeated": { "type": "integer", "description": "Total foes defeated." },
+        "prestigeLevel": { "type": "integer", "description": "Solar Ascension prestige rank (0..99)." },
+        "highestSpireFloor": { "type": "integer", "description": "Highest Endless Spire floor cleared (0..9999)." },
+        "publicVisible": { "type": "boolean", "description": "Explicit leaderboard visibility flag enforced by queries and rules." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp() on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp() on update." }
+      },
+      "required": [
+        "userId", "displayName", "heroClass", "heroLevel", "heroPower",
+        "weeklySteps", "weekKey", "bossesDefeated", "publicVisible",
+        "createdAt", "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/HeroProfile" },
+      "description": "Private hero profile, Sol Coins, active pet reference, RPG progression (Realms, Spire, Skills, Quests, Prestige), and timed expedition state owned strictly by userId."
+    },
+    "/users/{userId}/inventory/{itemId}": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "Private equipment and consumable items with combat/expedition perks belonging to userId."
+    },
+    "/users/{userId}/chests/{chestId}": {
+      "schema": { "$ref": "#/entities/LootChest" },
+      "description": "Private sealed treasure chests waiting to be interactively looted by userId."
+    },
+    "/users/{userId}/pets/{petId}": {
+      "schema": { "$ref": "#/entities/OwnedPet" },
+      "description": "Private owned companion pets with leveling and pet gear loadouts owned strictly by userId."
+    },
+    "/leaderboard/{userId}": {
+      "schema": { "$ref": "#/entities/LeaderboardEntry" },
+      "description": "Public competitive leaderboard entries readable by signed-in players via publicVisible query and writable strictly by the owner."
+    }
+  }
+}

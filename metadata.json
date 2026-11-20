@@ -1,0 +1,6 @@
+{
+  "name": "Solstride",
+  "description": "Sunlit tactical step-powered RPG for Android with Samsung Galaxy Watch Wear OS sync, turn-based combat, inventory and leveling mechanics, offline Room-to-Firestore syncing, cloud leaderboards, custom haptics, and hands-free voice commands.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

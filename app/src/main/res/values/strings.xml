@@ -1,0 +1,32 @@
+<resources>
+    <string name="app_name">Solstride</string>
+    <string name="tagline">Sunlit Step-Powered Tactical RPG</string>
+    <string name="sign_in_google">Sign in with Google</string>
+    <string name="sign_out">Sign Out</string>
+    <string name="nav_expedition">Expedition</string>
+    <string name="nav_battle">Battle</string>
+    <string name="nav_pets">Pets</string>
+    <string name="nav_inventory">Hero &amp; Gear</string>
+    <string name="nav_leaderboard">Ranks</string>
+    <string name="mode_sunlit">Sunlit Mode</string>
+    <string name="mode_oled">OLED Saver</string>
+    <string name="voice_listening">Listening for command…</string>
+    <string name="voice_tap_hint">Voice Cmd</string>
+    <string name="watch_connected">Galaxy Watch Linked</string>
+    <string name="watch_disconnected">Watch Disconnected</string>
+    <string name="sync_now">Sync Now</string>
+    <string name="grant_step_permission">Enable Step Tracking</string>
+    <string name="grant_mic_permission">Enable Voice Commands</string>
+    <string name="encounter_ready_title">Encounter Alert!</string>
+    <string name="encounter_ready_cta">Engage Battle</string>
+    <string name="action_strike">Strike</string>
+    <string name="action_skill">Solar Skill</string>
+    <string name="action_guard">Guard</string>
+    <string name="action_heal">Elixir</string>
+    <string name="action_retreat">Retreat</string>
+    <string name="leaderboard_weekly_steps">Weekly Steps</string>
+    <string name="leaderboard_hero_power">Hero Power</string>
+    <string name="sol_coins_label">Sol Coins</string>
+    <string name="timed_expedition_title">Timed Expeditions</string>
+    <string name="health_connect_rationale_title">Health Connect Privacy</string>
+</resources>
