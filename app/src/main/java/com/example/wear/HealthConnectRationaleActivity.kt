@@ -129,8 +129,8 @@ private fun HealthConnectRationaleScreen(onClose: () -> Unit) {
 
             RationaleItemCard(
                 icon = Icons.Filled.Shield,
-                title = "Smart Deduplication",
-                description = "When Solstride's built-in phone pedometer is active, phone-only records in Health Connect are filtered automatically to prevent double-counting."
+                title = "Samsung Health & Smart Deduplication",
+                description = "Solstride reads deduplicated daily step totals from Samsung Health (including Galaxy Watch steps) via Health Connect. Whenever a watch is connected, the phone's built-in pedometer automatically enters standby so steps are never double-counted."
             )
 
             Spacer(modifier = Modifier.height(6.dp))

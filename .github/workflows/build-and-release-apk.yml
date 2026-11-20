@@ -26,30 +26,59 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses & install SDK 36.1
+        shell: bash
+        run: |
+          set +o pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager --install "platform-tools" "build-tools;36.0.0" "platforms;android-36.1"
+          if [ -d "${ANDROID_HOME}/platforms/android-36.1" ] && [ ! -e "${ANDROID_HOME}/platforms/android-36" ]; then
+            ln -s "${ANDROID_HOME}/platforms/android-36.1" "${ANDROID_HOME}/platforms/android-36"
+          fi
+
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Accept Android SDK licenses & install SDK 36.1
-        run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36.1" "build-tools;36.0.0"
-
       - name: Prepare signing keystore and environment file
+        shell: bash
         run: |
           if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
-            base64 -d debug.keystore.base64 > debug.keystore
+            tr -d '\r\n ' < debug.keystore.base64 | base64 -d > debug.keystore
           fi
-          if [ ! -f .env ] && [ -f .env.example ]; then
-            cp .env.example .env
+          if [ ! -s debug.keystore ]; then
+            echo "Generating fallback Android debug keystore..."
+            rm -f debug.keystore
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          if [ ! -f .env ]; then
+            if [ -f .env.example ]; then
+              cp .env.example .env
+            else
+              touch .env
+            fi
           fi
 
       - name: Build Solstride Debug APK
-        run: gradle :app:assembleDebug --no-daemon
+        env:
+          GRADLE_OPTS: "-Xmx4g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Prepare versioned APK filename
         id: meta
+        shell: bash
         run: |
           VERSION_NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
           VERSION_CODE=$(grep -E 'versionCode\s*=' app/build.gradle.kts | head -n 1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')
@@ -66,13 +95,30 @@ jobs:
         with:
           name: Solstride-v${{ steps.meta.outputs.version_name }}-apk
           path: ${{ steps.meta.outputs.apk_name }}
+          if-no-files-found: error
 
       - name: Publish GitHub Release with APK
+        id: gh_release
+        continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.meta.outputs.version_name }}
           name: Solstride v${{ steps.meta.outputs.version_name }} (Build ${{ steps.meta.outputs.version_code }})
           body: |
             Automated Solstride Android APK build (`com.aistudio.solstride.kxmrvq`, version `${{ steps.meta.outputs.version_name }}`, build `${{ steps.meta.outputs.version_code }}`).
+
+            Includes Android Health Connect & Samsung Health compatibility, Watch-priority automatic pedometer, and closed-app background step sync.
           files: ${{ steps.meta.outputs.apk_name }}
           make_latest: true
+
+      - name: Summarize APK download status
+        shell: bash
+        run: |
+          echo "### Solstride APK Build Succeeded" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **APK**: \`${{ steps.meta.outputs.apk_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Version**: \`${{ steps.meta.outputs.version_name }}\` (Build \`${{ steps.meta.outputs.version_code }}\`)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.gh_release.outcome }}" = "success" ]; then
+            echo "- **GitHub Release**: Published tag \`v${{ steps.meta.outputs.version_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- **GitHub Release**: Skipped (enable **Settings → Actions → General → Workflow permissions → Read and write permissions** to auto-publish Releases). You can still download the APK directly from the **Artifacts** section of this workflow run." >> "$GITHUB_STEP_SUMMARY"
+          fi

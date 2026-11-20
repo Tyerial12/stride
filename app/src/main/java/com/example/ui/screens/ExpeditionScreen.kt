@@ -93,6 +93,7 @@ fun ExpeditionScreen(
     onCycleDailyStepGoal: () -> Unit,
     onRequestHealthConnectPermission: () -> Unit,
     onInstallOrOpenHealthConnect: () -> Unit,
+    onOpenSamsungHealth: () -> Unit,
     onEngageBattle: (Boolean) -> Unit,
     onRestAtCamp: () -> Unit,
     onOpenWatchSheet: () -> Unit,
@@ -423,12 +424,20 @@ fun ExpeditionScreen(
 
                 Text(
                     text = when (healthConnectStatus.state) {
-                        HealthConnectState.CONNECTED ->
-                            "Linked: ${healthConnectStatus.primaryWatchSource} • ${String.format(Locale.US, "%,d", healthConnectStatus.watchStepsToday)} watch steps today • Auto-syncing every 5s • Lifetime ${String.format(Locale.US, "%,d", profile.totalSteps)} steps."
+                        HealthConnectState.CONNECTED -> {
+                            val samsungNote = when {
+                                healthConnectStatus.samsungHealthLinked ->
+                                    "Samsung Health: ${String.format(Locale.US, "%,d", healthConnectStatus.samsungHealthStepsToday)} steps today • "
+                                healthConnectStatus.samsungHealthInstalled ->
+                                    "Samsung Health detected (enable Health Connect → Steps inside Samsung Health) • "
+                                else -> ""
+                            }
+                            "${samsungNote}Linked: ${healthConnectStatus.primaryWatchSource} • ${String.format(Locale.US, "%,d", healthConnectStatus.watchStepsToday)} watch steps today • Auto-syncing every 5s • Lifetime ${String.format(Locale.US, "%,d", profile.totalSteps)} steps."
+                        }
                         HealthConnectState.PERMISSION_REQUIRED ->
-                            "Grant Health Connect Read Steps access to import live steps from Galaxy Watch (Samsung Health), Pixel Watch (Fitbit), Garmin, or Wear OS every 5 seconds."
+                            "Grant Health Connect Read Steps access to import deduplicated live steps from Samsung Health (Galaxy Watch), Pixel Watch (Fitbit), Garmin, or Wear OS every 5 seconds."
                         HealthConnectState.UPDATE_REQUIRED ->
-                            "Install or update Android Health Connect from Google Play to sync watch steps automatically."
+                            "Install or update Android Health Connect from Google Play to sync Samsung Health & watch steps automatically."
                         HealthConnectState.UNAVAILABLE ->
                             if (watchStatus.connected) {
                                 "Linked: ${watchStatus.watchDisplayName} • Auto-syncing every 5 seconds • Lifetime ${String.format(Locale.US, "%,d", profile.totalSteps)} steps."
@@ -455,7 +464,7 @@ fun ExpeditionScreen(
                     ) {
                         Icon(Icons.Filled.Watch, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Connect Watch (Health Connect)")
+                        Text("Connect Samsung Health & Watch")
                     }
                 } else if (healthConnectStatus.state == HealthConnectState.UPDATE_REQUIRED) {
                     Spacer(modifier = Modifier.height(10.dp))
@@ -467,6 +476,26 @@ fun ExpeditionScreen(
                             .testTag("install_health_connect_button")
                     ) {
                         Text("Install Health Connect")
+                    }
+                }
+
+                if (healthConnectStatus.samsungHealthInstalled && healthConnectStatus.state == HealthConnectState.CONNECTED) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onOpenSamsungHealth,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("expedition_open_samsung_health_button"),
+                        border = BorderStroke(1.5.dp, ext.borderStrong)
+                    ) {
+                        Text(
+                            if (healthConnectStatus.samsungHealthLinked) {
+                                "Samsung Health Linked • Open App"
+                            } else {
+                                "Open Samsung Health (Enable Health Connect)"
+                            }
+                        )
                     }
                 }
 

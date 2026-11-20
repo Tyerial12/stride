@@ -10,7 +10,9 @@ import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.HealthConnectFeatures
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.metadata.DataOrigin
 import androidx.health.connect.client.records.metadata.Device
+import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import com.example.data.local.SolstridePreferences
@@ -33,6 +35,9 @@ data class HealthConnectSyncStatus(
     val state: HealthConnectState = HealthConnectState.UNAVAILABLE,
     val primaryWatchSource: String = "Health Connect",
     val watchStepsToday: Long = 0L,
+    val samsungHealthInstalled: Boolean = false,
+    val samsungHealthLinked: Boolean = false,
+    val samsungHealthStepsToday: Long = 0L,
     val phoneStepsIgnoredToday: Long = 0L,
     val backgroundReadSupported: Boolean = false,
     val backgroundReadGranted: Boolean = false,
@@ -41,16 +46,18 @@ data class HealthConnectSyncStatus(
 )
 
 /**
- * Full-compatibility Android Health Connect client for Solstride.
+ * Full-compatibility Android Health Connect & Samsung Health client for Solstride.
  *
- * - Supports Samsung Health (Galaxy Watch), Pixel Watch / Fitbit, Garmin Connect, Google Fit,
- *   Amazfit / Zepp, Oura, Polar, Suunto, Withings, and Wear OS.
+ * - First-class Samsung Health (`com.sec.android.app.shealth`) compatibility using Health Connect's
+ *   deduplicated `aggregate(StepsRecord.COUNT_TOTAL)` filtered to Samsung Health's `DataOrigin`,
+ *   ensuring exact parity with Samsung Health / Galaxy Watch daily totals even when One UI writes
+ *   merged records tagged as `Device.TYPE_PHONE` or overlapping watch/phone segments.
+ * - Also supports Pixel Watch / Fitbit, Garmin Connect, Google Fit, Amazfit / Zepp, Oura, Polar,
+ *   Suunto, Withings, and Wear OS.
  * - Supports optional Health Connect background read (`READ_HEALTH_DATA_IN_BACKGROUND`) when
  *   available on the device, while functioning 100% with foreground `READ_STEPS` + 24h catch-up.
- * - Uses per-record delta watermarks persisted in SolstridePreferences so live in-place updates
- *   (same metadata.id, growing count) are captured every 5 seconds without double-counting.
- * - Filters out phone-only step records while Solstride's built-in phone pedometer is active
- *   (unless the user enables "Include All Health Connect Sources" or pauses the phone pedometer).
+ * - Uses persisted watermarks in SolstridePreferences so live step increments sync cleanly every
+ *   5 seconds without double-counting.
  */
 class HealthConnectStepReader(
     context: Context,
@@ -58,8 +65,39 @@ class HealthConnectStepReader(
 ) {
     private val appContext = context.applicationContext
 
-    private val _status = MutableStateFlow(HealthConnectSyncStatus())
+    private val _status = MutableStateFlow(
+        HealthConnectSyncStatus(samsungHealthInstalled = isSamsungHealthInstalled())
+    )
     val status: StateFlow<HealthConnectSyncStatus> = _status.asStateFlow()
+
+    fun isSamsungHealthInstalled(): Boolean {
+        return runCatching {
+            val pm = appContext.packageManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageInfo(
+                    SAMSUNG_HEALTH_PACKAGE,
+                    android.content.pm.PackageManager.PackageInfoFlags.of(0L)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(SAMSUNG_HEALTH_PACKAGE, 0)
+            }
+            true
+        }.getOrDefault(false)
+    }
+
+    fun buildOpenSamsungHealthIntent(): Intent {
+        val launchIntent = appContext.packageManager.getLaunchIntentForPackage(SAMSUNG_HEALTH_PACKAGE)
+        if (launchIntent != null) {
+            return launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("market://details?id=$SAMSUNG_HEALTH_PACKAGE")
+        ).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    }
 
     fun coreStepPermissions(): Set<String> {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -84,24 +122,29 @@ class HealthConnectStepReader(
     }
 
     suspend fun refreshStatus(): HealthConnectSyncStatus {
+        val samsungInstalled = isSamsungHealthInstalled()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             val unsupported = HealthConnectSyncStatus(
                 state = HealthConnectState.UNAVAILABLE,
-                primaryWatchSource = "Requires Android 8.0+"
+                primaryWatchSource = "Requires Android 8.0+",
+                samsungHealthInstalled = samsungInstalled
             )
             _status.value = unsupported
             return unsupported
         }
-        return refreshStatusApi26()
+        return refreshStatusApi26(samsungInstalled)
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
-    private suspend fun refreshStatusApi26(): HealthConnectSyncStatus {
+    private suspend fun refreshStatusApi26(
+        samsungInstalled: Boolean = isSamsungHealthInstalled()
+    ): HealthConnectSyncStatus {
         return try {
             when (HealthConnectClient.getSdkStatus(appContext, PROVIDER_PACKAGE_NAME)) {
                 HealthConnectClient.SDK_UNAVAILABLE -> {
                     val s = _status.value.copy(
                         state = HealthConnectState.UNAVAILABLE,
+                        samsungHealthInstalled = samsungInstalled,
                         backgroundReadSupported = false,
                         backgroundReadGranted = false,
                         lastError = null
@@ -112,6 +155,7 @@ class HealthConnectStepReader(
                 HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> {
                     val s = _status.value.copy(
                         state = HealthConnectState.UPDATE_REQUIRED,
+                        samsungHealthInstalled = samsungInstalled,
                         backgroundReadSupported = false,
                         backgroundReadGranted = false,
                         lastError = null
@@ -138,6 +182,7 @@ class HealthConnectStepReader(
                     }
                     val s = _status.value.copy(
                         state = nextState,
+                        samsungHealthInstalled = samsungInstalled,
                         backgroundReadSupported = bgSupported,
                         backgroundReadGranted = bgGranted,
                         lastError = null
@@ -152,6 +197,7 @@ class HealthConnectStepReader(
             Log.w(TAG, "Health Connect status check failed: ${e.message}")
             val s = _status.value.copy(
                 state = HealthConnectState.UNAVAILABLE,
+                samsungHealthInstalled = samsungInstalled,
                 lastError = e.localizedMessage
             )
             _status.value = s
@@ -160,19 +206,32 @@ class HealthConnectStepReader(
     }
 
     /**
-     * Pulls newly added or incremented StepsRecord deltas from Health Connect over the last 24 hours.
+     * Pulls newly added or incremented StepsRecord deltas from Health Connect (including
+     * deduplicated Samsung Health daily aggregates) over the last 24 hours.
      *
-     * @param includeAllSources When true, reads all Health Connect step sources (watch + fitness apps + phone).
-     *                          When false, skips phone-only records to avoid double-counting Solstride's built-in pedometer.
+     * @param includeAllSources When true, reads all Health Connect step sources (watch + Samsung Health + fitness apps).
+     *                          When false, skips phone-only records while Solstride's built-in phone pedometer is active,
+     *                          while ALWAYS accepting Samsung Health when a Galaxy Watch is connected or watch records exist.
+     * @param watchConnected    True if a paired watch (e.g. Galaxy Watch / Wear OS) is currently connected.
      */
-    suspend fun pullNewWatchSteps(includeAllSources: Boolean = false): List<WatchStepPayload> {
+    suspend fun pullNewWatchSteps(
+        includeAllSources: Boolean = false,
+        watchConnected: Boolean = false
+    ): List<WatchStepPayload> {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return emptyList()
-        return pullNewWatchStepsApi26(includeAllSources = includeAllSources)
+        return pullNewWatchStepsApi26(
+            includeAllSources = includeAllSources,
+            watchConnected = watchConnected
+        )
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
-    private suspend fun pullNewWatchStepsApi26(includeAllSources: Boolean): List<WatchStepPayload> {
-        val currentStatus = refreshStatusApi26()
+    private suspend fun pullNewWatchStepsApi26(
+        includeAllSources: Boolean,
+        watchConnected: Boolean
+    ): List<WatchStepPayload> {
+        val samsungInstalled = isSamsungHealthInstalled()
+        val currentStatus = refreshStatusApi26(samsungInstalled)
         if (currentStatus.state != HealthConnectState.CONNECTED) {
             return emptyList()
         }
@@ -180,7 +239,11 @@ class HealthConnectStepReader(
         val nowMs = System.currentTimeMillis()
         val nowInstant = Instant.ofEpochMilli(nowMs)
         val lookbackStart = nowInstant.minusSeconds(LOOKBACK_SECONDS)
-        val todayStartInstant = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant()
+        val zone = ZoneId.systemDefault()
+        val todayDate = LocalDate.now(zone)
+        val todayStartInstant = todayDate.atStartOfDay(zone).toInstant()
+        val yesterdayDate = todayDate.minusDays(1)
+        val yesterdayStartInstant = yesterdayDate.atStartOfDay(zone).toInstant()
 
         return try {
             val client = HealthConnectClient.getOrCreate(appContext)
@@ -202,6 +265,28 @@ class HealthConnectStepReader(
                 pages += 1
             } while (!pageToken.isNullOrEmpty() && pages < MAX_PAGES)
 
+            // Deduplicated Samsung Health daily total via Health Connect aggregate()
+            val samsungAggregateToday = runCatching {
+                client.aggregate(
+                    AggregateRequest(
+                        metrics = setOf(StepsRecord.COUNT_TOTAL),
+                        timeRangeFilter = TimeRangeFilter.between(todayStartInstant, nowInstant),
+                        dataOriginFilter = setOf(DataOrigin(SAMSUNG_HEALTH_PACKAGE))
+                    )
+                )[StepsRecord.COUNT_TOTAL] ?: 0L
+            }.getOrDefault(0L)
+
+            val samsungRecords = allRecords.filter { isSamsungHealthOrigin(it.metadata.dataOrigin.packageName) }
+            val hasSamsungRecords = samsungRecords.isNotEmpty() || samsungAggregateToday > 0L
+            val hasSamsungWatchRecord = samsungRecords.any { rec ->
+                val dtype = rec.metadata.device?.type
+                dtype == Device.TYPE_WATCH || dtype == Device.TYPE_FITNESS_BAND || dtype == Device.TYPE_RING
+            }
+            val rawSamsungTodayFallback = samsungRecords
+                .filter { !it.endTime.isBefore(todayStartInstant) }
+                .sumOf { it.count }
+            val samsungStepsToday = if (samsungAggregateToday > 0L) samsungAggregateToday else rawSamsungTodayFallback
+
             val watermarks = decodeWatermarks(preferences.readHealthConnectWatermarksRaw()).toMutableMap()
             var watermarksChanged = false
             val payloads = mutableListOf<WatchStepPayload>()
@@ -210,12 +295,87 @@ class HealthConnectStepReader(
             var phoneStepsIgnoredToday = 0L
             val detectedSources = linkedSetOf<String>()
 
+            // 1. Handle Samsung Health via deduplicated aggregate (prevents overlapping watch+phone double-counting
+            //    and ensures One UI merged records tagged as TYPE_PHONE still sync seamlessly!)
+            val shouldAcceptSamsungHealth = hasSamsungRecords && (
+                watchConnected ||
+                    includeAllSources ||
+                    hasSamsungWatchRecord
+                )
+
+            if (hasSamsungRecords) {
+                if (shouldAcceptSamsungHealth) {
+                    val label = if (watchConnected || hasSamsungWatchRecord) {
+                        "Samsung Health (Galaxy Watch)"
+                    } else {
+                        "Samsung Health"
+                    }
+                    detectedSources.add(label)
+                    watchStepsToday += samsungStepsToday
+
+                    // Catch any late-synced steps from yesterday right after midnight if yesterday was tracked
+                    val yesterdayKey = "shealth_$yesterdayDate"
+                    val prevYesterday = watermarks[yesterdayKey]
+                    if (prevYesterday != null) {
+                        val samsungAggregateYesterday = runCatching {
+                            client.aggregate(
+                                AggregateRequest(
+                                    metrics = setOf(StepsRecord.COUNT_TOTAL),
+                                    timeRangeFilter = TimeRangeFilter.between(yesterdayStartInstant, todayStartInstant),
+                                    dataOriginFilter = setOf(DataOrigin(SAMSUNG_HEALTH_PACKAGE))
+                                )
+                            )[StepsRecord.COUNT_TOTAL] ?: 0L
+                        }.getOrDefault(0L)
+                        val yDelta = (samsungAggregateYesterday - prevYesterday.syncedCount).coerceAtLeast(0L)
+                        if (yDelta > 0L) {
+                            watermarks[yesterdayKey] = WatermarkEntry(
+                                syncedCount = samsungAggregateYesterday,
+                                endMs = todayStartInstant.toEpochMilli()
+                            )
+                            watermarksChanged = true
+                            payloads.add(
+                                WatchStepPayload(
+                                    batchId = "hc_${yesterdayKey}_$samsungAggregateYesterday",
+                                    stepDelta = yDelta.coerceAtMost(MAX_SINGLE_RECORD_DELTA),
+                                    recordedAtMs = nowMs
+                                )
+                            )
+                        }
+                    }
+
+                    // Today's deduplicated Samsung Health delta
+                    val todayKey = "shealth_$todayDate"
+                    val prevToday = watermarks[todayKey]?.syncedCount ?: 0L
+                    val todayDelta = (samsungStepsToday - prevToday).coerceAtLeast(0L)
+                    if (todayDelta > 0L) {
+                        watermarks[todayKey] = WatermarkEntry(syncedCount = samsungStepsToday, endMs = nowMs)
+                        watermarksChanged = true
+                        payloads.add(
+                            WatchStepPayload(
+                                batchId = "hc_${todayKey}_$samsungStepsToday",
+                                stepDelta = todayDelta.coerceAtMost(MAX_SINGLE_RECORD_DELTA),
+                                recordedAtMs = nowMs
+                            )
+                        )
+                    } else if (samsungStepsToday > 0L && watermarks[todayKey] == null) {
+                        watermarks[todayKey] = WatermarkEntry(syncedCount = samsungStepsToday, endMs = nowMs)
+                        watermarksChanged = true
+                    }
+                } else {
+                    // Phone-only Samsung Health while no watch is connected & Solstride's phone pedometer is active
+                    phoneStepsIgnoredToday += samsungStepsToday
+                }
+            }
+
+            // 2. Process all other Health Connect sources (Fitbit, Garmin, Google Fit, Wear OS, Zepp, Oura, etc.)
             for (record in allRecords) {
                 val count = record.count
                 if (count <= 0L) continue
 
                 val originPkg = record.metadata.dataOrigin.packageName
                 if (originPkg == appContext.packageName) continue
+                // Samsung Health is already handled via deduplicated aggregate above
+                if (isSamsungHealthOrigin(originPkg)) continue
 
                 val deviceType = record.metadata.device?.type
                 val isToday = !record.endTime.isBefore(todayStartInstant)
@@ -265,11 +425,16 @@ class HealthConnectStepReader(
                 preferences.writeHealthConnectWatermarksRaw(encodeWatermarks(pruned))
             }
 
-            val primaryLabel = detectedSources.firstOrNull() ?: "Health Connect (Ready)"
+            val primaryLabel = detectedSources.firstOrNull()
+                ?: if (samsungInstalled) "Health Connect (Link Samsung Health)" else "Health Connect (Ready)"
+
             _status.value = currentStatus.copy(
                 state = HealthConnectState.CONNECTED,
                 primaryWatchSource = primaryLabel,
                 watchStepsToday = watchStepsToday,
+                samsungHealthInstalled = samsungInstalled,
+                samsungHealthLinked = hasSamsungRecords,
+                samsungHealthStepsToday = samsungStepsToday,
                 phoneStepsIgnoredToday = phoneStepsIgnoredToday,
                 lastSyncedAtMs = nowMs,
                 lastError = null
@@ -281,6 +446,7 @@ class HealthConnectStepReader(
         } catch (e: SecurityException) {
             Log.w(TAG, "Health Connect read blocked (permission or background restriction): ${e.message}")
             _status.value = _status.value.copy(
+                samsungHealthInstalled = samsungInstalled,
                 lastSyncedAtMs = nowMs,
                 lastError = "Health Connect permission check needed"
             )
@@ -288,6 +454,7 @@ class HealthConnectStepReader(
         } catch (e: Exception) {
             Log.w(TAG, "Health Connect readRecords failed: ${e.message}")
             _status.value = _status.value.copy(
+                samsungHealthInstalled = samsungInstalled,
                 lastSyncedAtMs = nowMs,
                 lastError = e.localizedMessage
             )
@@ -295,10 +462,15 @@ class HealthConnectStepReader(
         }
     }
 
+    private fun isSamsungHealthOrigin(originPackage: String): Boolean {
+        val pkg = originPackage.lowercase()
+        return pkg == SAMSUNG_HEALTH_PACKAGE || pkg.contains("shealth")
+    }
+
     /**
      * Excludes phone-only step records so Health Connect never double-counts Solstride's
      * built-in phone pedometer. Accepts watch/band/ring devices and wearable companion apps
-     * (like Samsung Health, Fitbit, Garmin, Wear OS) even when OEM writes Device.TYPE_UNKNOWN.
+     * (like Fitbit, Garmin, Wear OS) even when OEM writes Device.TYPE_UNKNOWN.
      */
     private fun isPhoneOnlyRecord(originPackage: String, deviceType: Int?): Boolean {
         if (originPackage == appContext.packageName) return true
@@ -377,6 +549,8 @@ class HealthConnectStepReader(
     companion object {
         private const val TAG = "HealthConnectSteps"
         const val PROVIDER_PACKAGE_NAME = "com.google.android.apps.healthdata"
+        const val SAMSUNG_HEALTH_PACKAGE = "com.sec.android.app.shealth"
+        const val GALAXY_WEARABLE_PACKAGE = "com.samsung.android.app.watchmanager"
         private const val LOOKBACK_SECONDS = 24L * 60L * 60L
         private const val WATERMARK_RETENTION_MS = 36L * 60L * 60L * 1000L
         private const val MAX_WATERMARK_ENTRIES = 250

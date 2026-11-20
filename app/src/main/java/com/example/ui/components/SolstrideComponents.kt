@@ -426,6 +426,7 @@ fun WatchSyncBottomSheet(
     onRequestHealthConnectPermission: () -> Unit,
     onRequestHealthConnectBackgroundPermission: () -> Unit,
     onInstallOrOpenHealthConnect: () -> Unit,
+    onOpenSamsungHealth: () -> Unit,
     onToggleHealthConnectAllSources: () -> Unit,
     onToggleBatteryBatching: () -> Unit,
     onToggleHaptics: () -> Unit
@@ -589,6 +590,71 @@ fun WatchSyncBottomSheet(
                         }
                     }
                     HealthConnectState.UNAVAILABLE -> Unit
+                }
+            }
+
+            // Dedicated Samsung Health Compatibility Card
+            SolstrideCard(
+                containerColor = if (healthConnectStatus.samsungHealthLinked) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                },
+                strongBorder = healthConnectStatus.samsungHealthLinked
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Samsung Health",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Text(
+                        text = when {
+                            healthConnectStatus.samsungHealthLinked -> "SYNCING"
+                            healthConnectStatus.samsungHealthInstalled -> "INSTALLED"
+                            else -> "COMPATIBLE"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = if (healthConnectStatus.samsungHealthLinked) {
+                            MaterialTheme.colorScheme.tertiary
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        }
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = when {
+                        healthConnectStatus.samsungHealthLinked ->
+                            "Samsung Health today: ${String.format(Locale.US, "%,d", healthConnectStatus.samsungHealthStepsToday)} deduplicated steps. Galaxy Watch & Samsung Health steps sync automatically via Health Connect without double-counting."
+                        healthConnectStatus.samsungHealthInstalled ->
+                            "Samsung Health is installed! To sync Galaxy Watch or Samsung Health steps:\n1. Open Samsung Health → ⋮ Settings → Health Connect\n2. Allow Samsung Health to write Steps\n3. Ensure Solstride has Health Connect Steps access above."
+                        else ->
+                            "Compatible with Samsung Health & Galaxy Watch via Android Health Connect. Install Samsung Health to sync Galaxy Watch steps directly into Solstride."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                androidx.compose.material3.OutlinedButton(
+                    onClick = onOpenSamsungHealth,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("sheet_open_samsung_health_button")
+                ) {
+                    Text(
+                        if (healthConnectStatus.samsungHealthInstalled) {
+                            "Open Samsung Health"
+                        } else {
+                            "Get Samsung Health on Play Store"
+                        }
+                    )
                 }
             }
 

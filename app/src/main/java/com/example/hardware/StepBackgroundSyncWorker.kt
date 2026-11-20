@@ -98,11 +98,15 @@ class StepBackgroundSyncWorker(
         val now = System.currentTimeMillis()
 
         try {
-            // 1. Pull Health Connect watch steps first so we know if a watch is actively supplying steps
+            // 1. Check Wear OS / Galaxy Watch connection first so Samsung Health aggregate steps sync cleanly
+            val wearWatchConnected = isWearWatchConnectedNow()
+
+            // 2. Pull Health Connect & Samsung Health watch steps
             val includeAllHcSources = preferences.readHealthConnectAllSources() || !preferences.readPedometerEnabled()
             val hcPayloads = runCatching {
                 HealthConnectStepReader(applicationContext, preferences).pullNewWatchSteps(
-                    includeAllSources = includeAllHcSources
+                    includeAllSources = includeAllHcSources,
+                    watchConnected = wearWatchConnected
                 )
             }.getOrDefault(emptyList())
 
@@ -121,8 +125,7 @@ class StepBackgroundSyncWorker(
                 )
             }
 
-            // 2. Check whether a watch is currently connected (Wear OS node or active recent watch sync)
-            val wearWatchConnected = isWearWatchConnectedNow()
+            // 3. Determine whether any watch is currently active (Wear OS node or recent watch sync)
             val recentWatchSync = (now - preferences.readLastWatchStepReceivedMs()) <= WATCH_ACTIVE_GRACE_MS
             val watchConnected = wearWatchConnected || hcPayloads.isNotEmpty() || recentWatchSync
 

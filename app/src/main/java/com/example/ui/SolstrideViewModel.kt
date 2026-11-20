@@ -453,6 +453,9 @@ class SolstrideViewModel(
     fun buildHealthConnectSettingsIntent(): android.content.Intent =
         healthConnectReader.buildHealthConnectSettingsIntent()
 
+    fun buildOpenSamsungHealthIntent(): android.content.Intent =
+        healthConnectReader.buildOpenSamsungHealthIntent()
+
     fun toggleHealthConnectAllSources() {
         val next = !settings.value.healthConnectAllSources
         viewModelScope.launch {
@@ -573,7 +576,10 @@ class SolstrideViewModel(
             stepTracker.flush()
         }
         val includeAllHcSources = settings.value.healthConnectAllSources || !settings.value.pedometerEnabled
-        val hcPayloads = healthConnectReader.pullNewWatchSteps(includeAllSources = includeAllHcSources)
+        val hcPayloads = healthConnectReader.pullNewWatchSteps(
+            includeAllSources = includeAllHcSources,
+            watchConnected = watchLinkStatus.value.connected
+        )
         val wearPayloads = watchBridge.pullPendingWatchSteps()
         val allWatchPayloads = hcPayloads + wearPayloads
         if (allWatchPayloads.isNotEmpty()) {

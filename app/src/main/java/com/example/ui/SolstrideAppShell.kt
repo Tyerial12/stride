@@ -220,6 +220,16 @@ fun SolstrideAppShell(
         }
     }
 
+    fun openSamsungHealthApp() {
+        try {
+            context.startActivity(viewModel.buildOpenSamsungHealthIntent())
+        } catch (_: Exception) {
+            scope.launch {
+                snackbarHostState.showSnackbar("Install Samsung Health from Google Play or Galaxy Store to link Galaxy Watch steps.")
+            }
+        }
+    }
+
     val voiceLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -562,6 +572,7 @@ fun SolstrideAppShell(
                                     onCycleDailyStepGoal = { viewModel.cycleDailyStepGoal() },
                                     onRequestHealthConnectPermission = { requestHealthConnectAccess() },
                                     onInstallOrOpenHealthConnect = { openHealthConnectInstallerOrSettings() },
+                                    onOpenSamsungHealth = { openSamsungHealthApp() },
                                     onEngageBattle = { boss -> viewModel.engageEncounter(boss) },
                                     onRestAtCamp = { viewModel.restAtSunlitCamp() },
                                     onOpenWatchSheet = { viewModel.openWatchSheet(true) },
@@ -669,6 +680,7 @@ fun SolstrideAppShell(
             onRequestHealthConnectPermission = { requestHealthConnectAccess() },
             onRequestHealthConnectBackgroundPermission = { requestHealthConnectBackgroundAccess() },
             onInstallOrOpenHealthConnect = { openHealthConnectInstallerOrSettings() },
+            onOpenSamsungHealth = { openSamsungHealthApp() },
             onToggleHealthConnectAllSources = { viewModel.toggleHealthConnectAllSources() },
             onToggleBatteryBatching = { viewModel.toggleBatteryBatching() },
             onToggleHaptics = { viewModel.toggleHaptics() }
