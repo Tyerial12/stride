@@ -98,8 +98,11 @@ class StepBackgroundSyncWorker(
         val now = System.currentTimeMillis()
 
         try {
-            // 1. Check Wear OS / Galaxy Watch connection first so Samsung Health aggregate steps sync cleanly
+            // 1. Check live Wear OS / Galaxy Watch Bluetooth node connection first
             val wearWatchConnected = isWearWatchConnectedNow()
+            if (!wearWatchConnected) {
+                preferences.setLastWatchStepReceivedMs(0L)
+            }
 
             // 2. Pull Health Connect & Samsung Health watch steps
             val includeAllHcSources = preferences.readHealthConnectAllSources() || !preferences.readPedometerEnabled()
@@ -110,7 +113,7 @@ class StepBackgroundSyncWorker(
                 )
             }.getOrDefault(emptyList())
 
-            if (hcPayloads.isNotEmpty()) {
+            if (wearWatchConnected && hcPayloads.isNotEmpty()) {
                 preferences.setLastWatchStepReceivedMs(now)
             }
             for (payload in hcPayloads) {
@@ -125,9 +128,8 @@ class StepBackgroundSyncWorker(
                 )
             }
 
-            // 3. Determine whether any watch is currently active (Wear OS node or recent watch sync)
-            val recentWatchSync = (now - preferences.readLastWatchStepReceivedMs()) <= WATCH_ACTIVE_GRACE_MS
-            val watchConnected = wearWatchConnected || hcPayloads.isNotEmpty() || recentWatchSync
+            // 3. Phone pedometer ONLY pauses when a watch is actually connected right now
+            val watchConnected = wearWatchConnected
 
             // 3. Phone pedometer ONLY counts when NO watch is connected!
             if (hasActivityRecognitionPermission()) {
@@ -317,7 +319,15 @@ class StepBackgroundSyncWorker(
     private suspend fun isWearWatchConnectedNow(): Boolean {
         return withTimeoutOrNull(2_000L) {
             runCatching {
-                Wearable.getNodeClient(applicationContext).connectedNodes.await().isNotEmpty()
+                val capabilityInfo = Wearable.getCapabilityClient(applicationContext)
+                    .getCapability(
+                        com.example.wear.WearDataPaths.CAPABILITY_SOLSTRIDE_WATCH_STEP_TRACKER,
+                        com.google.android.gms.wearable.CapabilityClient.FILTER_REACHABLE
+                    )
+                    .await()
+                val nearbyNode = capabilityInfo.nodes.firstOrNull { it.isNearby } ?: return@runCatching false
+                com.example.wear.WatchHeartbeatRegistry.isHeartbeatFresh(System.currentTimeMillis()) &&
+                    nearbyNode.id.isNotBlank()
             }.getOrDefault(false)
         } ?: false
     }

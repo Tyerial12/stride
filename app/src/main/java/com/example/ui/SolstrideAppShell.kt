@@ -350,21 +350,23 @@ fun SolstrideAppShell(
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                val watchReady = watchStatus.connected ||
-                                    healthConnectStatus.state == com.example.wear.HealthConnectState.CONNECTED
                                 Icon(
-                                    imageVector = if (isOnline) Icons.Filled.Watch else Icons.Filled.CloudOff,
+                                    imageVector = when {
+                                        !isOnline -> Icons.Filled.CloudOff
+                                        isWatchConnected -> Icons.Filled.Watch
+                                        else -> Icons.AutoMirrored.Filled.DirectionsWalk
+                                    },
                                     contentDescription = "Open Watch, Pedometer and offline sync status",
-                                    tint = if (watchReady) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                                    tint = if (isWatchConnected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = when {
                                         pendingBatches.isNotEmpty() -> "${pendingBatches.size}Q"
-                                        watchReady -> "5s Sync"
+                                        isWatchConnected -> "Watch 5s"
                                         !isOnline -> "Offline"
-                                        else -> "Watch"
+                                        else -> "Phone Live"
                                     },
                                     style = MaterialTheme.typography.labelSmall
                                 )

@@ -95,6 +95,9 @@ private fun SolstrideRoot() {
                                 onBaselineUpdated = { baseline ->
                                     vmRef.onHardwareBaselineUpdated(baseline)
                                 },
+                                onWatchToggleBroadcast = { watchConnected, watchName ->
+                                    vmRef.onWatchConnectionBroadcastReceived(watchConnected, watchName)
+                                },
                                 onStepDelta = { delta ->
                                     vmRef.onHardwareStepsReceived(delta)
                                 }

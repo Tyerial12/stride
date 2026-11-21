@@ -148,29 +148,13 @@ class SolstrideViewModel(
     val healthConnectStatus: StateFlow<HealthConnectSyncStatus> = healthConnectReader.status
 
     /**
-     * True whenever a paired smartwatch is currently connected (Wear OS / Galaxy Watch Bluetooth link,
-     * or a non-Wear OS watch actively syncing via Health Connect). While true, the phone pedometer
-     * stays off in standby and phone steps do NOT count.
+     * True ONLY when a paired smartwatch is currently connected via Bluetooth / Wear OS node link.
+     * When the watch is not connected, this is immediately false so the phone pedometer activates
+     * right away and never falsely shows "Watch Connected".
      */
-    val isWatchConnected: StateFlow<Boolean> = combine(
-        watchLinkStatus,
-        healthConnectStatus,
-        _lastWatchStepReceivedMs,
-        _currentTimeMs
-    ) { watch, hc, lastWatchMs, nowMs ->
-        if (watch.connected) {
-            sawWearOsNode = true
-            true
-        } else if (!sawWearOsNode &&
-            hc.state == HealthConnectState.CONNECTED &&
-            lastWatchMs > 0L &&
-            (nowMs - lastWatchMs) <= WATCH_ACTIVE_GRACE_MS
-        ) {
-            true
-        } else {
-            false
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), false)
+    val isWatchConnected: StateFlow<Boolean> = watchLinkStatus
+        .map { watch -> watch.connected }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), false)
 
     val pendingBatches: StateFlow<List<PendingStepBatchEntity>> =
         offlineSyncDao.observePendingBatches(currentUserId)
@@ -277,8 +261,13 @@ class SolstrideViewModel(
                 .onFailure { err ->
                     _bannerMessage.value = "Offline mode active: ${err.localizedMessage ?: "waiting for network"}"
                 }
-            _lastWatchStepReceivedMs.value = preferences.readLastWatchStepReceivedMs()
-            watchBridge.refreshWatchConnection()
+            val currentWatchStatus = watchBridge.refreshWatchConnection()
+            if (!currentWatchStatus.connected) {
+                _lastWatchStepReceivedMs.value = 0L
+                preferences.setLastWatchStepReceivedMs(0L)
+            } else {
+                _lastWatchStepReceivedMs.value = preferences.readLastWatchStepReceivedMs()
+            }
             healthConnectReader.refreshStatus()
             reconcilePedometerWithWatchState()
         }
@@ -403,6 +392,32 @@ class SolstrideViewModel(
         }
     }
 
+    fun onWatchConnectionBroadcastReceived(watchConnected: Boolean, watchName: String?) {
+        viewModelScope.launch {
+            watchBridge.markWatchConnectionFromBroadcast(
+                connected = watchConnected,
+                nodeId = null,
+                displayName = watchName
+            )
+            if (!watchConnected) {
+                // Watch disconnected: clear grace timer, enable phone pedometer, and switch immediately
+                _lastWatchStepReceivedMs.value = 0L
+                preferences.setLastWatchStepReceivedMs(0L)
+                preferences.setPedometerEnabled(true)
+                preferences.setLastHardwareStepCount(-1L)
+                reconcilePedometerWithWatchState()
+                _bannerMessage.value = "Watch disconnected — automatically switched to Phone Pedometer."
+            } else {
+                val now = System.currentTimeMillis()
+                _lastWatchStepReceivedMs.value = now
+                preferences.setLastWatchStepReceivedMs(now)
+                reconcilePedometerWithWatchState()
+                val label = watchName?.ifBlank { activeWatchDisplayName() } ?: activeWatchDisplayName()
+                _bannerMessage.value = "$label connected — Phone Pedometer on standby."
+            }
+        }
+    }
+
     fun resetPedometerSession() {
         stepTracker.resetSession()
         haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
@@ -501,9 +516,15 @@ class SolstrideViewModel(
         BackgroundSyncGuard.setForeground(true)
         _currentTimeMs.value = System.currentTimeMillis()
         viewModelScope.launch {
-            // Check watch connection FIRST so phone pedometer NEVER turns on while a watch is connected!
-            _lastWatchStepReceivedMs.value = preferences.readLastWatchStepReceivedMs()
-            watchBridge.refreshWatchConnection()
+            // Check watch connection FIRST so phone pedometer NEVER turns on while a watch is connected,
+            // and immediately turns ON if no watch is connected!
+            val currentWatchStatus = watchBridge.refreshWatchConnection()
+            if (!currentWatchStatus.connected) {
+                _lastWatchStepReceivedMs.value = 0L
+                preferences.setLastWatchStepReceivedMs(0L)
+            } else {
+                _lastWatchStepReceivedMs.value = preferences.readLastWatchStepReceivedMs()
+            }
             healthConnectReader.refreshStatus()
             reconcilePedometerWithWatchState()
             syncWatchStepsCycle(refreshNode = false, silent = true)
@@ -582,10 +603,13 @@ class SolstrideViewModel(
         )
         val wearPayloads = watchBridge.pullPendingWatchSteps()
         val allWatchPayloads = hcPayloads + wearPayloads
-        if (allWatchPayloads.isNotEmpty()) {
+        if (watchLinkStatus.value.connected && allWatchPayloads.isNotEmpty()) {
             val now = System.currentTimeMillis()
             _lastWatchStepReceivedMs.value = now
             preferences.setLastWatchStepReceivedMs(now)
+        } else if (!watchLinkStatus.value.connected) {
+            _lastWatchStepReceivedMs.value = 0L
+            preferences.setLastWatchStepReceivedMs(0L)
         }
         reconcilePedometerWithWatchState()
         for (payload in allWatchPayloads) {
@@ -1944,6 +1968,7 @@ class SolstrideViewModel(
     override fun onCleared() {
         super.onCleared()
         BackgroundSyncGuard.setForeground(false)
+        stepTracker.unregisterWatchDisconnectReceiver()
         stepTracker.stopTracking()
     }
 

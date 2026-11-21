@@ -29,4 +29,5 @@
     <string name="sol_coins_label">Sol Coins</string>
     <string name="timed_expedition_title">Timed Expeditions</string>
     <string name="health_connect_rationale_title">Health Connect Privacy</string>
+    <string name="default_web_client_id" translatable="false">308720200884-povn1r9o6m56iongq38b8fvgkvr7nl44.apps.googleusercontent.com</string>
 </resources>

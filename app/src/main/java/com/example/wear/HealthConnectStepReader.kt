@@ -38,6 +38,7 @@ data class HealthConnectSyncStatus(
     val samsungHealthInstalled: Boolean = false,
     val samsungHealthLinked: Boolean = false,
     val samsungHealthStepsToday: Long = 0L,
+    val hasWatchDeviceRecordToday: Boolean = false,
     val phoneStepsIgnoredToday: Long = 0L,
     val backgroundReadSupported: Boolean = false,
     val backgroundReadGranted: Boolean = false,
@@ -295,12 +296,14 @@ class HealthConnectStepReader(
             var phoneStepsIgnoredToday = 0L
             val detectedSources = linkedSetOf<String>()
 
-            // 1. Handle Samsung Health via deduplicated aggregate (prevents overlapping watch+phone double-counting
-            //    and ensures One UI merged records tagged as TYPE_PHONE still sync seamlessly!)
+            // 1. Handle Samsung Health via deduplicated aggregate ONLY when a Galaxy Watch is actually connected
+            //    or a watch record was written by Samsung Health (or user explicitly opted into All Health Connect Sources).
+            //    Notice: we do NOT treat "includeAllSources" alone as a connected watch, nor do we let phone-only
+            //    Samsung Health records fool Solstride into thinking a watch is connected!
             val shouldAcceptSamsungHealth = hasSamsungRecords && (
                 watchConnected ||
-                    includeAllSources ||
-                    hasSamsungWatchRecord
+                    hasSamsungWatchRecord ||
+                    includeAllSources
                 )
 
             if (hasSamsungRecords) {
@@ -308,7 +311,7 @@ class HealthConnectStepReader(
                     val label = if (watchConnected || hasSamsungWatchRecord) {
                         "Samsung Health (Galaxy Watch)"
                     } else {
-                        "Samsung Health"
+                        "Samsung Health (Phone/App)"
                     }
                     detectedSources.add(label)
                     watchStepsToday += samsungStepsToday
@@ -367,6 +370,8 @@ class HealthConnectStepReader(
                 }
             }
 
+            var hasOtherWatchDeviceRecordToday = false
+
             // 2. Process all other Health Connect sources (Fitbit, Garmin, Google Fit, Wear OS, Zepp, Oura, etc.)
             for (record in allRecords) {
                 val count = record.count
@@ -379,10 +384,17 @@ class HealthConnectStepReader(
 
                 val deviceType = record.metadata.device?.type
                 val isToday = !record.endTime.isBefore(todayStartInstant)
+                val isWearableDevice = deviceType == Device.TYPE_WATCH ||
+                    deviceType == Device.TYPE_FITNESS_BAND ||
+                    deviceType == Device.TYPE_RING
 
                 if (!includeAllSources && isPhoneOnlyRecord(originPkg, deviceType)) {
                     if (isToday) phoneStepsIgnoredToday += count
                     continue
+                }
+
+                if (isToday && isWearableDevice) {
+                    hasOtherWatchDeviceRecordToday = true
                 }
 
                 val friendlySource = mapOriginToSourceLabel(originPkg, deviceType)
@@ -426,7 +438,7 @@ class HealthConnectStepReader(
             }
 
             val primaryLabel = detectedSources.firstOrNull()
-                ?: if (samsungInstalled) "Health Connect (Link Samsung Health)" else "Health Connect (Ready)"
+                ?: if (samsungInstalled) "Health Connect (No Watch Detected)" else "Health Connect (Ready)"
 
             _status.value = currentStatus.copy(
                 state = HealthConnectState.CONNECTED,
@@ -435,6 +447,7 @@ class HealthConnectStepReader(
                 samsungHealthInstalled = samsungInstalled,
                 samsungHealthLinked = hasSamsungRecords,
                 samsungHealthStepsToday = samsungStepsToday,
+                hasWatchDeviceRecordToday = hasSamsungWatchRecord || hasOtherWatchDeviceRecordToday,
                 phoneStepsIgnoredToday = phoneStepsIgnoredToday,
                 lastSyncedAtMs = nowMs,
                 lastError = null

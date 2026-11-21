@@ -1,7 +1,10 @@
 package com.example.hardware
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -10,6 +13,7 @@ import android.hardware.SensorManager
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.example.wear.WatchConnectionBroadcast
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,10 +41,15 @@ data class StepTrackerTelemetry(
  *  1. Primary: Sensor.TYPE_STEP_COUNTER (low-power cumulative hardware counter with persisted baseline)
  *  2. Secondary: Sensor.TYPE_STEP_DETECTOR (instant per-step hardware trigger)
  *  3. Fallback: Sensor.TYPE_ACCELEROMETER (filtered walking peak detector on devices without step co-processor)
+ *
+ * Also registers a BroadcastReceiver for WatchConnectionBroadcast.ACTION_TOGGLE_LOCAL_STEP_SENSOR
+ * emitted by SolstrideWearableListenerService and GalaxyWatchBridge so the local phone step counter
+ * sensor immediately starts when a watch disconnects and pauses when a watch connects.
  */
 class StepTrackerManager(
     context: Context,
     private val onBaselineUpdated: (Long) -> Unit = {},
+    private val onWatchToggleBroadcast: (watchConnected: Boolean, watchName: String?) -> Unit = { _, _ -> },
     private val onStepDelta: (Long) -> Unit
 ) : SensorEventListener {
 
@@ -52,6 +61,7 @@ class StepTrackerManager(
 
     private var activeSensor: Sensor? = null
     private var isRegistered: Boolean = false
+    private var isReceiverRegistered: Boolean = false
     private var lastHardwareBaseline: Long = -1L
     private var sessionSteps: Long = 0L
     private var lastBatchingEnabled: Boolean = true
@@ -63,6 +73,61 @@ class StepTrackerManager(
     private var gravityEstimate = SensorManager.GRAVITY_EARTH
     private var lastAccelStepMs = 0L
     private var abovePeakThreshold = false
+
+    private val watchToggleReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != WatchConnectionBroadcast.ACTION_TOGGLE_LOCAL_STEP_SENSOR) return
+            val watchConnected = intent.getBooleanExtra(
+                WatchConnectionBroadcast.EXTRA_WATCH_CONNECTED,
+                false
+            )
+            val enableLocalSensor = intent.getBooleanExtra(
+                WatchConnectionBroadcast.EXTRA_ENABLE_LOCAL_STEP_SENSOR,
+                !watchConnected
+            )
+            val watchName = intent.getStringExtra(WatchConnectionBroadcast.EXTRA_WATCH_DISPLAY_NAME)
+
+            if (enableLocalSensor && !watchConnected) {
+                // Watch disconnected: re-anchor hardware baseline and start local phone step counter sensor
+                lastHardwareBaseline = -1L
+                startTracking(lastBatchingEnabled)
+                Log.d(TAG, "Watch disconnect broadcast received -> local phone step counter sensor ENABLED")
+            } else {
+                // Watch connected: immediately place local phone step counter sensor in standby
+                pauseForWatch(watchName?.ifBlank { "Samsung Galaxy Watch" } ?: "Samsung Galaxy Watch")
+                Log.d(TAG, "Watch connect broadcast received -> local phone step counter sensor STANDBY")
+            }
+            onWatchToggleBroadcast(watchConnected, watchName)
+        }
+    }
+
+    init {
+        registerWatchDisconnectReceiver()
+    }
+
+    fun registerWatchDisconnectReceiver() {
+        if (isReceiverRegistered) return
+        val filter = IntentFilter(WatchConnectionBroadcast.ACTION_TOGGLE_LOCAL_STEP_SENSOR)
+        runCatching {
+            ContextCompat.registerReceiver(
+                appContext,
+                watchToggleReceiver,
+                filter,
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            isReceiverRegistered = true
+        }.onFailure { err ->
+            Log.w(TAG, "Unable to register watch toggle receiver: ${err.message}")
+        }
+    }
+
+    fun unregisterWatchDisconnectReceiver() {
+        if (!isReceiverRegistered) return
+        runCatching {
+            appContext.unregisterReceiver(watchToggleReceiver)
+        }
+        isReceiverRegistered = false
+    }
 
     fun setPersistedBaseline(savedBaseline: Long, force: Boolean = false) {
         if (savedBaseline >= 0L && (force || lastHardwareBaseline < 0L)) {

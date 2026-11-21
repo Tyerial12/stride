@@ -381,7 +381,6 @@ fun ExpeditionScreen(
 
         // Smart Watch & Health Connect Auto-Sync Card (5s Cadence)
         item {
-            val watchLinked = healthConnectStatus.state == HealthConnectState.CONNECTED || watchStatus.connected
             SolstrideCard(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -392,29 +391,36 @@ fun ExpeditionScreen(
                         Icon(
                             imageVector = Icons.Filled.Watch,
                             contentDescription = "Smart watch Health Connect auto sync",
-                            tint = if (watchLinked) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
+                            tint = if (isWatchConnected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Watch Steps (5s Auto-Sync)",
+                            text = if (isWatchConnected) {
+                                "Watch Connected (5s Sync)"
+                            } else {
+                                "Watch Disconnected (Phone Active)"
+                            },
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = if (watchLinked) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer,
+                        color = if (isWatchConnected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                         border = BorderStroke(1.dp, ext.borderStrong)
                     ) {
                         Text(
                             text = when {
-                                healthConnectStatus.state == HealthConnectState.CONNECTED -> "LIVE 5S"
+                                isWatchConnected -> "WATCH LIVE"
                                 healthConnectStatus.state == HealthConnectState.PERMISSION_REQUIRED -> "CONNECT"
-                                watchStatus.connected -> "WEAR 5S"
-                                else -> "AUTO 5S"
+                                else -> "NO WATCH"
                             },
                             style = MaterialTheme.typography.labelSmall,
                             fontFamily = JetBrainsMonoFontFamily,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            color = if (isWatchConnected) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
@@ -423,27 +429,17 @@ fun ExpeditionScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = when (healthConnectStatus.state) {
-                        HealthConnectState.CONNECTED -> {
-                            val samsungNote = when {
-                                healthConnectStatus.samsungHealthLinked ->
-                                    "Samsung Health: ${String.format(Locale.US, "%,d", healthConnectStatus.samsungHealthStepsToday)} steps today • "
-                                healthConnectStatus.samsungHealthInstalled ->
-                                    "Samsung Health detected (enable Health Connect → Steps inside Samsung Health) • "
-                                else -> ""
-                            }
-                            "${samsungNote}Linked: ${healthConnectStatus.primaryWatchSource} • ${String.format(Locale.US, "%,d", healthConnectStatus.watchStepsToday)} watch steps today • Auto-syncing every 5s • Lifetime ${String.format(Locale.US, "%,d", profile.totalSteps)} steps."
-                        }
-                        HealthConnectState.PERMISSION_REQUIRED ->
-                            "Grant Health Connect Read Steps access to import deduplicated live steps from Samsung Health (Galaxy Watch), Pixel Watch (Fitbit), Garmin, or Wear OS every 5 seconds."
-                        HealthConnectState.UPDATE_REQUIRED ->
-                            "Install or update Android Health Connect from Google Play to sync Samsung Health & watch steps automatically."
-                        HealthConnectState.UNAVAILABLE ->
-                            if (watchStatus.connected) {
-                                "Linked: ${watchStatus.watchDisplayName} • Auto-syncing every 5 seconds • Lifetime ${String.format(Locale.US, "%,d", profile.totalSteps)} steps."
-                            } else {
-                                "Lifetime ${String.format(Locale.US, "%,d", profile.totalSteps)} steps synced. Pair a Wear OS watch or use the built-in Phone Pedometer above."
-                            }
+                    text = when {
+                        isWatchConnected ->
+                            "Watch Connected (${watchStatus.watchDisplayName}) • Phone pedometer is OFF so only watch steps count • Auto-syncing every 5s • Lifetime ${String.format(Locale.US, "%,d", profile.totalSteps)} steps."
+                        healthConnectStatus.state == HealthConnectState.CONNECTED ->
+                            "No watch connected right now — Built-In Phone Pedometer is counting your steps. Health Connect & Samsung Health are ready and will auto-switch as soon as your watch connects."
+                        healthConnectStatus.state == HealthConnectState.PERMISSION_REQUIRED ->
+                            "No watch connected — Built-In Phone Pedometer is active. Grant Health Connect Read Steps access if you want Samsung Health / Galaxy Watch steps to sync when your watch connects."
+                        healthConnectStatus.state == HealthConnectState.UPDATE_REQUIRED ->
+                            "No watch connected — Built-In Phone Pedometer is active. Install or update Android Health Connect from Google Play for watch sync."
+                        else ->
+                            "No watch connected — Built-In Phone Pedometer is counting your steps (${String.format(Locale.US, "%,d", profile.totalSteps)} lifetime steps)."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -595,7 +591,7 @@ private fun OnDevicePedometerCard(
         "${(todaySteps * 0.76).roundToInt()} m"
     }
     val estKcal = (todaySteps * 0.04).roundToInt()
-    val standbyForWatch = isWatchConnected || telemetry.status == StepSensorStatus.STANDBY_WATCH_CONNECTED
+    val standbyForWatch = isWatchConnected
 
     val badgeLabel = when {
         standbyForWatch -> "WATCH ONLY"

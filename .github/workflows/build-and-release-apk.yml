@@ -52,7 +52,7 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Prepare signing keystore and environment file
+      - name: Prepare signing keystore, Firebase config, and environment file
         shell: bash
         run: |
           if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
@@ -77,6 +77,67 @@ jobs:
             else
               touch .env
             fi
+          fi
+          if [ ! -s app/google-services.json ]; then
+            echo "Restoring app/google-services.json for com.aistudio.solstride.kxmrvq..."
+            cat << 'EOF' > app/google-services.json
+          {
+            "project_info": {
+              "project_number": "308720200884",
+              "project_id": "gen-lang-client-0756465100",
+              "storage_bucket": "gen-lang-client-0756465100.firebasestorage.app"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:308720200884:android:629307e34d242f30803be1",
+                  "android_client_info": {
+                    "package_name": "com.aistudio.solstride.kxmrvq"
+                  }
+                },
+                "oauth_client": [
+                  {
+                    "client_id": "308720200884-o96pq94cbdus1ibqvonma10uk0u1aa85.apps.googleusercontent.com",
+                    "client_type": 1,
+                    "android_info": {
+                      "package_name": "com.aistudio.solstride.kxmrvq",
+                      "certificate_hash": "171a093227d75bd9ca5493a530654574d977a9ce"
+                    }
+                  },
+                  {
+                    "client_id": "308720200884-povn1r9o6m56iongq38b8fvgkvr7nl44.apps.googleusercontent.com",
+                    "client_type": 3
+                  }
+                ],
+                "api_key": [
+                  {
+                    "current_key": "AIzaSyCfXhj9nJUUXIvXU29LwDUuk2EtWC7jE0A"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": [
+                      {
+                        "client_id": "308720200884-povn1r9o6m56iongq38b8fvgkvr7nl44.apps.googleusercontent.com",
+                        "client_type": 3
+                      }
+                    ]
+                  }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          EOF
+          fi
+          if [ ! -s app/src/main/res/values/firebase_applet_config.xml ]; then
+            mkdir -p app/src/main/res/values
+            cat << 'EOF' > app/src/main/res/values/firebase_applet_config.xml
+          <?xml version="1.0" encoding="utf-8" standalone="no"?>
+          <resources>
+              <string name="firestore_database_id" translatable="false">ai-studio-android-solstrid-53bf7141-bec2-4153-856e-085cbb45e845</string>
+          </resources>
+          EOF
           fi
 
       - name: Build Solstride Debug APK
@@ -139,7 +200,7 @@ jobs:
           body: |
             Automated Solstride Android APK build (`com.aistudio.solstride.kxmrvq`, version `${{ steps.meta.outputs.version_name }}`, build `${{ steps.meta.outputs.version_code }}`).
 
-            Includes Android Health Connect & Samsung Health compatibility, Watch-priority automatic pedometer, and closed-app background step sync.
+            Includes Android Health Connect & Samsung Health compatibility, CapabilityClient + Heartbeat Watch-priority automatic pedometer, and closed-app background step sync.
           files: ${{ steps.meta.outputs.apk_name }}
           make_latest: true
 
