@@ -276,58 +276,20 @@ class SolstrideFirestoreRepository(
         val starters = listOf(
             "starter_sunblade" to mapOf(
                 "userId" to uid,
-                "name" to "Sunforged Gladius",
+                "name" to "Weathered Bronze Blade",
                 "slot" to ItemSlot.WEAPON.name,
-                "rarity" to ItemRarity.RARE.name,
-                "attackBonus" to 10L,
-                "defenseBonus" to 2L,
-                "hpBonus" to 0L,
-                "energyBonus" to 0L,
-                "healAmount" to 0L,
-                "upgradeLevel" to 1L,
-                "quantity" to 1L,
-                "equipped" to true,
-                "description" to "+10% Critical Strike Chance • Tempered bronze blade etched with astrolabe markings.",
-                "perkType" to GearPerkType.CRIT_CHANCE.name,
-                "perkValue" to 10L,
-                "createdAt" to FieldValue.serverTimestamp(),
-                "updatedAt" to FieldValue.serverTimestamp()
-            ),
-            "starter_aegis" to mapOf(
-                "userId" to uid,
-                "name" to "Limestone Brigandine",
-                "slot" to ItemSlot.ARMOR.name,
                 "rarity" to ItemRarity.COMMON.name,
-                "attackBonus" to 0L,
-                "defenseBonus" to 7L,
-                "hpBonus" to 18L,
+                "attackBonus" to 8L,
+                "defenseBonus" to 0L,
+                "hpBonus" to 0L,
                 "energyBonus" to 0L,
                 "healAmount" to 0L,
                 "upgradeLevel" to 0L,
                 "quantity" to 1L,
                 "equipped" to true,
-                "description" to "-8% Incoming Enemy Damage • Breathable desert mail built for long marches.",
-                "perkType" to GearPerkType.DAMAGE_REDUCTION.name,
-                "perkValue" to 8L,
-                "createdAt" to FieldValue.serverTimestamp(),
-                "updatedAt" to FieldValue.serverTimestamp()
-            ),
-            "starter_compass" to mapOf(
-                "userId" to uid,
-                "name" to "Sundial Stride Relic",
-                "slot" to ItemSlot.RELIC.name,
-                "rarity" to ItemRarity.RARE.name,
-                "attackBonus" to 2L,
-                "defenseBonus" to 2L,
-                "hpBonus" to 0L,
-                "energyBonus" to 15L,
-                "healAmount" to 0L,
-                "upgradeLevel" to 0L,
-                "quantity" to 1L,
-                "equipped" to true,
-                "description" to "+10% Expedition Survival Odds • Guides heroes safely across sunlit canyons.",
-                "perkType" to GearPerkType.EXPEDITION_WARD.name,
-                "perkValue" to 10L,
+                "description" to "+6% Critical Strike Chance • Basic starter blade. Gather materials to forge custom weapons and your first armor!",
+                "perkType" to GearPerkType.CRIT_CHANCE.name,
+                "perkValue" to 6L,
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
             ),
@@ -340,11 +302,11 @@ class SolstrideFirestoreRepository(
                 "defenseBonus" to 0L,
                 "hpBonus" to 0L,
                 "energyBonus" to 0L,
-                "healAmount" to 65L,
+                "healAmount" to 80L,
                 "upgradeLevel" to 0L,
-                "quantity" to 3L,
+                "quantity" to 2L,
                 "equipped" to false,
-                "description" to "Restores 65 HP instantly during or between battles.",
+                "description" to "Restores 80 HP instantly during or between battles.",
                 "perkType" to GearPerkType.NONE.name,
                 "perkValue" to 0L,
                 "createdAt" to FieldValue.serverTimestamp(),
@@ -353,6 +315,48 @@ class SolstrideFirestoreRepository(
         )
         starters.forEach { (docId, payload) ->
             invCol.document(docId).set(payload).await()
+        }
+    }
+
+    suspend fun resetAllUserProgress(userId: String, rawDisplayName: String?): Result<Unit> {
+        val profilePath = "users/$userId"
+        return try {
+            val uid = requireUserId(userId)
+            val userDoc = db.collection("users").document(uid)
+
+            // 1. Delete all inventory items
+            val invDocs = userDoc.collection("inventory").get().await()
+            for (doc in invDocs.documents) {
+                doc.reference.delete().await()
+            }
+
+            // 2. Delete all unopened chests
+            val chestDocs = userDoc.collection("chests").get().await()
+            for (doc in chestDocs.documents) {
+                doc.reference.delete().await()
+            }
+
+            // 3. Delete all owned pets
+            val petDocs = userDoc.collection("pets").get().await()
+            for (doc in petDocs.documents) {
+                doc.reference.delete().await()
+            }
+
+            // 4. Delete hero profile and re-create a clean Level 1 profile with starter 6-slot gear
+            val existingSnap = userDoc.get().await()
+            val preservedName = rawDisplayName?.trim()?.take(48).takeUnless { it.isNullOrBlank() }
+                ?: existingSnap.getString("displayName")?.take(48)
+                ?: "Solar Vanguard"
+            if (existingSnap.exists()) {
+                userDoc.delete().await()
+            }
+
+            ensureInitializedProfile(uid, preservedName)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, profilePath)
+            Result.failure(e)
         }
     }
 
@@ -429,6 +433,59 @@ class SolstrideFirestoreRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Atomically verifies a chest still exists, permanently deletes it, and writes the rolled
+     * reward item inside a single Firestore transaction so no chest can ever be opened twice.
+     */
+    suspend fun openAndConsumeLootChest(
+        userId: String,
+        chestId: String,
+        item: InventoryItem
+    ): Result<String> {
+        val path = "users/$userId/chests/$chestId"
+        return try {
+            val uid = requireUserId(userId)
+            require(chestId.isNotBlank()) { "Chest ID must not be blank" }
+            val chestRef = db.collection("users").document(uid).collection("chests").document(chestId)
+            val newDocId = "item_${UUID.randomUUID().toString().replace("-", "").take(12)}"
+            val itemRef = db.collection("users").document(uid).collection("inventory").document(newDocId)
+            val payload = mapOf(
+                "userId" to uid,
+                "name" to item.name.trim().take(60).ifBlank { "Relic" },
+                "slot" to item.slot,
+                "rarity" to item.rarity,
+                "attackBonus" to item.attackBonus.coerceIn(0L, 9999L),
+                "defenseBonus" to item.defenseBonus.coerceIn(0L, 9999L),
+                "hpBonus" to item.hpBonus.coerceIn(0L, 9999L),
+                "energyBonus" to item.energyBonus.coerceIn(0L, 999L),
+                "healAmount" to item.healAmount.coerceIn(0L, 99999L),
+                "upgradeLevel" to item.upgradeLevel.coerceIn(0L, 99L),
+                "quantity" to item.quantity.coerceIn(1L, 999L),
+                "equipped" to item.equipped,
+                "description" to item.description.take(180),
+                "perkType" to item.perkType,
+                "perkValue" to item.perkValue.coerceIn(0L, 100L),
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            db.runTransaction { txn ->
+                val snap = txn.get(chestRef)
+                if (!snap.exists()) {
+                    throw IllegalStateException("CHEST_ALREADY_CONSUMED")
+                }
+                txn.delete(chestRef)
+                txn.set(itemRef, payload)
+                newDocId
+            }.await()
+            Result.success(newDocId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
             Result.failure(e)
         }
     }
@@ -563,7 +620,7 @@ class SolstrideFirestoreRepository(
                 "defenseBonus" to item.defenseBonus.coerceIn(0L, 9999L),
                 "hpBonus" to item.hpBonus.coerceIn(0L, 9999L),
                 "energyBonus" to item.energyBonus.coerceIn(0L, 999L),
-                "healAmount" to item.healAmount.coerceIn(0L, 9999L),
+                "healAmount" to item.healAmount.coerceIn(0L, 99999L),
                 "upgradeLevel" to item.upgradeLevel.coerceIn(0L, 99L),
                 "quantity" to item.quantity.coerceIn(1L, 999L),
                 "equipped" to item.equipped,

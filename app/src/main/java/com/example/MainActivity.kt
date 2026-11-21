@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -7,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
@@ -30,22 +32,49 @@ import com.example.ui.auth.AuthScreen
 import com.example.ui.theme.SolstrideDisplayMode
 import com.example.ui.theme.SolstrideTheme
 import com.example.wear.GalaxyWatchBridge
+import com.example.widget.SolstrideWidgetUpdater
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    private val pendingWidgetTabState = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         com.example.hardware.StepBackgroundSyncScheduler.ensureScheduled(applicationContext)
+        com.example.widget.WidgetAutoSyncScheduler.syncSchedule(applicationContext)
+        extractWidgetDeepLink(intent)
         setContent {
-            SolstrideRoot()
+            val targetTab by pendingWidgetTabState
+            SolstrideRoot(
+                pendingWidgetTab = targetTab,
+                onWidgetTabConsumed = { pendingWidgetTabState.value = null }
+            )
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        extractWidgetDeepLink(intent)
+    }
+
+    private fun extractWidgetDeepLink(intent: Intent?) {
+        val tab = intent?.getStringExtra(SolstrideWidgetUpdater.EXTRA_WIDGET_TARGET_TAB)
+        if (!tab.isNullOrBlank()) {
+            pendingWidgetTabState.value = tab
+            intent.removeExtra(SolstrideWidgetUpdater.EXTRA_WIDGET_TARGET_TAB)
         }
     }
 }
 
 @Composable
-private fun SolstrideRoot() {
+private fun SolstrideRoot(
+    pendingWidgetTab: String?,
+    onWidgetTabConsumed: () -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val preferences = remember(context) { SolstridePreferences(context.applicationContext) }
@@ -102,6 +131,7 @@ private fun SolstrideRoot() {
                                 }
                             )
                             vmRef = SolstrideViewModel(
+                                appContext = app.applicationContext,
                                 currentUserId = uid,
                                 initialDisplayName = user.displayName,
                                 repository = repository,
@@ -119,7 +149,9 @@ private fun SolstrideRoot() {
                 )
                 SolstrideAppShell(
                     currentUserId = uid,
-                    viewModel = viewModel
+                    viewModel = viewModel,
+                    pendingWidgetTab = pendingWidgetTab,
+                    onWidgetTabConsumed = onWidgetTabConsumed
                 )
             }
         }

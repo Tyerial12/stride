@@ -1,6 +1,7 @@
 package com.example.domain
 
 import com.example.data.model.DerivedHeroStats
+import com.example.data.model.ElementalAffinity
 import com.example.data.model.GearPerkType
 import com.example.data.model.HeroProfile
 import com.example.data.model.InventoryItem
@@ -28,13 +29,24 @@ enum class ExpeditionRiskTier(val label: String) {
     PERILOUS("Perilous")
 }
 
+data class ExpeditionSolCoinReward(
+    val elapsedMinutes: Int,
+    val plannedDurationMinutes: Int,
+    val timeSpentPercent: Int,
+    val maxDurationPercent: Int,
+    val fullSolCoins: Long,
+    val earnedSolCoins: Long
+)
+
 data class ExpeditionRiskForecast(
     val durationMinutes: Int,
     val survivalChancePct: Int,
     val recommendedGearPower: Int,
     val currentGearPower: Int,
     val ultraRareChancePct: Int,
-    val riskTier: ExpeditionRiskTier
+    val riskTier: ExpeditionRiskTier,
+    val expectedSolCoins: Long = 1L,
+    val durationTimePercent: Int = 1
 )
 
 data class ExpeditionOutcomeReport(
@@ -45,21 +57,92 @@ data class ExpeditionOutcomeReport(
     val sunshardsEarned: Long,
     val hpLost: Long,
     val awardedChest: LootChest?,
-    val summaryMessage: String
+    val summaryMessage: String,
+    val solCoinsEarned: Long = 0L,
+    val timeSpentPercent: Int = 100
 )
 
 data class ChestOpenResult(
-    val chest: LootChest,
+    val chest: LootChest = LootChest(),
     val item: InventoryItem,
-    val wasUltraRare: Boolean
+    val wasUltraRare: Boolean,
+    val rolledRarity: ItemRarity = item.resolvedRarity()
 )
+
+enum class ForgeBlueprintTier(
+    val tierNumber: Int,
+    val label: String,
+    val minHeroLevel: Int,
+    val baseRarity: ItemRarity,
+    val oreCost: Long,
+    val herbCost: Long,
+    val essenceCost: Long,
+    val sunshardCost: Long,
+    val powerScalar: Float
+) {
+    BRONZE_SURVIVOR(
+        tierNumber = 1,
+        label = "Tier I • Ironhide",
+        minHeroLevel = 1,
+        baseRarity = ItemRarity.COMMON,
+        oreCost = 10L,
+        herbCost = 5L,
+        essenceCost = 2L,
+        sunshardCost = 20L,
+        powerScalar = 1.65f
+    ),
+    SUNSTEEL_VANGUARD(
+        tierNumber = 2,
+        label = "Tier II • Sunsteel",
+        minHeroLevel = 3,
+        baseRarity = ItemRarity.RARE,
+        oreCost = 22L,
+        herbCost = 10L,
+        essenceCost = 6L,
+        sunshardCost = 55L,
+        powerScalar = 2.65f
+    ),
+    OBSIDIAN_MASTERWORK(
+        tierNumber = 3,
+        label = "Tier III • Obsidian",
+        minHeroLevel = 6,
+        baseRarity = ItemRarity.EPIC,
+        oreCost = 40L,
+        herbCost = 18L,
+        essenceCost = 14L,
+        sunshardCost = 120L,
+        powerScalar = 3.85f
+    ),
+    ASTRAL_SOVEREIGN(
+        tierNumber = 4,
+        label = "Tier IV • Astral",
+        minHeroLevel = 10,
+        baseRarity = ItemRarity.SOLAR,
+        oreCost = 70L,
+        herbCost = 30L,
+        essenceCost = 26L,
+        sunshardCost = 240L,
+        powerScalar = 5.35f
+    )
+}
 
 object ExpeditionEngine {
 
     const val MIN_DURATION_MINUTES = 5
     const val MAX_DURATION_MINUTES = 23 * 60 // 1380 minutes (23 hours)
-    const val BOSS_VICTORY_SOL_COINS = 10L
+    const val MAX_EXPEDITION_SOL_COINS = 100L // 100% of max 23h expedition time = 100 Sol Coins
+    const val MIN_EARLY_STOP_COIN_MINUTES = 5
+    const val BOSS_VICTORY_SOL_COINS = 12L
     const val CAMP_HEAL_SOL_COIN_COST = 5L
+    const val PERK_REROLL_SOL_COIN_COST = 8L
+    const val PERK_REROLL_SUNSHARD_COST = 40L
+    const val RARITY_ASCEND_SOL_COIN_COST = 18L
+    const val RARITY_ASCEND_ORE_COST = 15L
+    const val RARITY_ASCEND_ESSENCE_COST = 8L
+    const val STABILIZER_SEAL_SOL_COIN_COST = 10L
+    const val FORGE_STABILIZER_SOL_COIN_COST = STABILIZER_SEAL_SOL_COIN_COST
+    const val REPAIR_ITEM_SOL_COIN_COST = 4L
+    const val REPAIR_ITEM_ORE_COST = 3L
 
     val presets: List<ExpeditionPreset> = listOf(
         ExpeditionPreset("recon_5m", "Quick Recon", 5, "5m", "Fast highland scout"),
@@ -69,36 +152,55 @@ object ExpeditionEngine {
         ExpeditionPreset("zenith_23h", "Zenith Odyssey", 1380, "23h", "Guaranteed Ultra Rare")
     )
 
-    /**
-     * Scales Ultra Rare drop probability smoothly from 12% at 5 minutes up to 100% at 18–23 hours.
-     * Preserved identically inside Expedition Loot Chests!
-     */
     fun ultraRareChancePercent(durationMinutes: Int): Int {
         val clamped = durationMinutes.coerceIn(MIN_DURATION_MINUTES, MAX_DURATION_MINUTES)
         return when {
-            clamped >= 1080 -> 100 // 18h..23h guaranteed Ultra Rare
-            clamped <= 30 -> {
-                // 5m -> 12%, 30m -> 24%
-                12 + ((clamped - 5) * 12f / 25f).roundToInt()
-            }
-            clamped <= 120 -> {
-                // 30m -> 24%, 2h -> 45%
-                24 + ((clamped - 30) * 21f / 90f).roundToInt()
-            }
-            clamped <= 480 -> {
-                // 2h -> 45%, 8h -> 76%
-                45 + ((clamped - 120) * 31f / 360f).roundToInt()
-            }
-            else -> {
-                // 8h -> 76%, 18h -> 100%
-                76 + ((clamped - 480) * 24f / 600f).roundToInt()
-            }
+            clamped >= 1080 -> 100
+            clamped <= 30 -> 12 + ((clamped - 5) * 12f / 25f).roundToInt()
+            clamped <= 120 -> 24 + ((clamped - 30) * 21f / 90f).roundToInt()
+            clamped <= 480 -> 45 + ((clamped - 120) * 31f / 360f).roundToInt()
+            else -> 76 + ((clamped - 480) * 24f / 600f).roundToInt()
         }.coerceIn(12, 100)
     }
 
     /**
-     * Returns a power multiplier (1.00x at 5m up to 1.65x at 23h) so longer expeditions roll stronger Ultra Rare gear.
+     * Computes Sol Coins earned from an expedition based on percent of time spent:
+     * - Full completion payout scales linearly with duration as a % of the 23h max expedition (up to 100 Sol Coins).
+     * - Stopping early awards the exact % of planned time spent (requires at least 5 minutes elapsed).
      */
+    fun computeSolCoinReward(
+        elapsedMinutes: Int,
+        plannedDurationMinutes: Int
+    ): ExpeditionSolCoinReward {
+        val safePlanned = plannedDurationMinutes.coerceIn(MIN_DURATION_MINUTES, MAX_DURATION_MINUTES)
+        val safeElapsed = elapsedMinutes.coerceIn(0, safePlanned)
+        val maxDurationFraction = safePlanned.toFloat() / MAX_DURATION_MINUTES.toFloat()
+        val maxDurationPct = (maxDurationFraction * 100f).roundToInt().coerceIn(1, 100)
+        val fullCoins = (maxDurationFraction * MAX_EXPEDITION_SOL_COINS.toFloat())
+            .roundToInt()
+            .toLong()
+            .coerceIn(1L, MAX_EXPEDITION_SOL_COINS)
+
+        val timeSpentFraction = (safeElapsed.toFloat() / safePlanned.toFloat()).coerceIn(0f, 1f)
+        val timeSpentPct = (timeSpentFraction * 100f).roundToInt().coerceIn(0, 100)
+        val earned = when {
+            safeElapsed >= safePlanned -> fullCoins
+            safeElapsed < MIN_EARLY_STOP_COIN_MINUTES -> 0L
+            else -> (fullCoins.toFloat() * timeSpentFraction)
+                .roundToInt()
+                .toLong()
+                .coerceIn(1L, fullCoins)
+        }
+        return ExpeditionSolCoinReward(
+            elapsedMinutes = safeElapsed,
+            plannedDurationMinutes = safePlanned,
+            timeSpentPercent = timeSpentPct,
+            maxDurationPercent = maxDurationPct,
+            fullSolCoins = fullCoins,
+            earnedSolCoins = earned
+        )
+    }
+
     fun lootPowerMultiplier(durationMinutes: Int): Float {
         val clamped = durationMinutes.coerceIn(MIN_DURATION_MINUTES, MAX_DURATION_MINUTES)
         val fraction = (clamped - MIN_DURATION_MINUTES).toFloat() /
@@ -106,10 +208,6 @@ object ExpeditionEngine {
         return 1.0f + (fraction * 0.65f)
     }
 
-    /**
-     * Gear Power threshold recommended for safely completing an expedition of [durationMinutes].
-     * Longer expeditions require stronger equipped Weapons, Armor, and Relics.
-     */
     fun recommendedGearPower(durationMinutes: Int, heroLevel: Int): Int {
         val clamped = durationMinutes.coerceIn(MIN_DURATION_MINUTES, MAX_DURATION_MINUTES)
         val safeLvl = heroLevel.coerceAtLeast(1)
@@ -123,10 +221,6 @@ object ExpeditionEngine {
         return baseHazard.coerceAtLeast(45)
     }
 
-    /**
-     * Evaluates expedition survival odds (30%..98%) anchored directly to equipped Weapon/Armor/Relic
-     * Gear Power, Armor Wayfarer Ward perks, Set Resonance, Skill Tree Pathfinder Ward, and Prestige.
-     */
     fun evaluateRiskForecast(
         durationMinutes: Int,
         stats: DerivedHeroStats,
@@ -137,12 +231,10 @@ object ExpeditionEngine {
         val currentGear = stats.gearPowerScore
         val gearRatio = (currentGear.toFloat() / recommended.toFloat()).coerceIn(0.15f, 1.65f)
 
-        // Base survival climbs from 34% (severely undergeared) to 78% at 1.0x gear power and 86% overgeared
         val baseSurvival = when {
             gearRatio < 1.0f -> 34f + ((gearRatio - 0.15f) / 0.85f) * 44f
             else -> 78f + ((gearRatio - 1.0f) / 0.65f) * 10f
         }
-        // Longer expeditions carry slightly higher inherent hazard unless mitigated by gear wards
         val durationHazardPenalty = when {
             clamped >= 1080 -> 12
             clamped >= 480 -> 8
@@ -158,13 +250,16 @@ object ExpeditionEngine {
             finalPct >= 45 -> ExpeditionRiskTier.RISKY
             else -> ExpeditionRiskTier.PERILOUS
         }
+        val coinPreview = computeSolCoinReward(clamped, clamped)
         return ExpeditionRiskForecast(
             durationMinutes = clamped,
             survivalChancePct = finalPct,
             recommendedGearPower = recommended,
             currentGearPower = currentGear,
             ultraRareChancePct = ultraRareChancePercent(clamped),
-            riskTier = tier
+            riskTier = tier,
+            expectedSolCoins = coinPreview.fullSolCoins,
+            durationTimePercent = coinPreview.maxDurationPercent
         )
     }
 
@@ -187,11 +282,6 @@ object ExpeditionEngine {
         return String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
     }
 
-    /**
-     * Resolves a finished timed expedition with a real survival check driven by equipped armor & weapons.
-     * Success spawns an interactive LootChest preserving exact 12%..100% Ultra Rare relic odds.
-     * Failure deals minor HP wear, grants small consolation XP, and drops zero chest.
-     */
     fun resolveCompletedExpedition(
         userId: String,
         profile: HeroProfile,
@@ -207,6 +297,7 @@ object ExpeditionEngine {
         val fullXp = (baseXp * stats.totalXpMultiplier).roundToInt().toLong().coerceAtLeast(25L)
         val fullShards = ((22L + (durationMin * 0.35f).roundToInt().toLong()) * stats.totalSunshardMultiplier)
             .roundToInt().toLong().coerceAtLeast(20L)
+        val coinReward = computeSolCoinReward(durationMin, durationMin)
 
         return if (succeeded) {
             val chest = LootChest(
@@ -225,11 +316,14 @@ object ExpeditionEngine {
                 sunshardsEarned = fullShards,
                 hpLost = 0L,
                 awardedChest = chest,
-                summaryMessage = "Expedition Succeeded (${forecast.survivalChancePct}% survival)! Sealed Relic Chest recovered (${forecast.ultraRareChancePct}% Ultra Rare odds)."
+                summaryMessage = "Expedition Succeeded (${forecast.survivalChancePct}% survival)! Earned +${coinReward.fullSolCoins} Sol Coins (${coinReward.maxDurationPercent}% of max time), Sealed Relic Chest & Forge Materials (${forecast.ultraRareChancePct}% Ultra Rare odds).",
+                solCoinsEarned = coinReward.fullSolCoins,
+                timeSpentPercent = 100
             )
         } else {
             val consolationXp = max(12L, (fullXp * 0.25f).roundToInt().toLong())
             val hpWear = max(10L, (stats.computedMaxHp * 0.18f).roundToInt().toLong())
+            val salvageCoins = max(1L, (coinReward.fullSolCoins * 0.5f).roundToInt().toLong())
             ExpeditionOutcomeReport(
                 succeeded = false,
                 durationMinutes = durationMin,
@@ -238,14 +332,16 @@ object ExpeditionEngine {
                 sunshardsEarned = 0L,
                 hpLost = hpWear,
                 awardedChest = null,
-                summaryMessage = "Expedition Failed (${forecast.survivalChancePct}% survival odds). Your hero escaped bruised (-$hpWear HP, +$consolationXp consolation XP, no treasure chest). Upgrade weapons, armor, or Wayfarer Ward perks to improve survival!"
+                summaryMessage = "Expedition Failed (${forecast.survivalChancePct}% survival odds). Your hero escaped bruised (-$hpWear HP, +$salvageCoins Sol Coins from 50% time salvage, +$consolationXp consolation XP, no treasure chest). Equip stronger gear to improve survival!",
+                solCoinsEarned = salvageCoins,
+                timeSpentPercent = 100
             )
         }
     }
 
     /**
-     * Opens any sealed LootChest and rolls a weapon, armor, relic, or elixir with real combat/expedition perks.
-     * Expedition chests preserve the exact duration-scaled Ultra Rare relic probability (12%..100%).
+     * Opens any sealed LootChest and rolls across all 6 equipment slots (Weapon, Armor, Helm, Boots, Ring, Relic)
+     * or an Alchemist Elixir.
      */
     fun openLootChest(chest: LootChest, userId: String): ChestOpenResult {
         val tier = chest.resolvedTier()
@@ -291,34 +387,118 @@ object ExpeditionEngine {
         }
         val effectiveTier = rarityMult * durationScale
 
-        // Ultra Rare / Boss / Expedition chests never waste a roll on plain consumables
-        val slotRoll = if (tier == LootChestTier.HIGHLAND && !isUltraRare && Random.nextFloat() < 0.18f) {
-            3
+        // Roll across all 6 equipment slots (or 14% chance for Consumable on Highland chests)
+        val slotRoll = if (tier == LootChestTier.HIGHLAND && !isUltraRare && Random.nextFloat() < 0.14f) {
+            6
         } else {
-            Random.nextInt(3)
+            Random.nextInt(6)
         }
 
-        val item = when (slotRoll) {
-            0 -> buildWeaponDrop(userId, safeLvl, rarity, effectiveTier, chest.sourceLabel)
-            1 -> buildArmorDrop(userId, safeLvl, rarity, effectiveTier, chest.sourceLabel)
-            2 -> buildRelicDrop(userId, safeLvl, rarity, effectiveTier, chest.sourceLabel)
-            else -> InventoryItem(
-                userId = userId,
-                name = "Sunburst Tonic",
-                slot = ItemSlot.CONSUMABLE.name,
-                rarity = ItemRarity.RARE.name,
-                healAmount = (75 + safeLvl * 14).toLong().coerceIn(50L, 9999L),
-                quantity = 2L,
-                description = "Recovered from ${chest.sourceLabel}. Restores HP mid-battle or at camp.",
-                perkType = GearPerkType.NONE.name,
-                perkValue = 0L
-            )
-        }
+        val item = buildEquipmentForSlotIndex(
+            slotIndex = slotRoll,
+            userId = userId,
+            safeLvl = safeLvl,
+            rarity = rarity,
+            effectiveTier = effectiveTier,
+            sourceLabel = chest.sourceLabel
+        )
 
         return ChestOpenResult(
             chest = chest,
             item = item,
             wasUltraRare = rarity == ItemRarity.ULTRA_RARE
+        )
+    }
+
+    fun rollBlackMarketMysteryItem(userId: String, heroLevel: Int): InventoryItem {
+        val safeLvl = heroLevel.coerceAtLeast(1)
+        val roll = Random.nextInt(100)
+        val rarity = when {
+            roll < 15 -> ItemRarity.ULTRA_RARE
+            roll < 48 -> ItemRarity.SOLAR
+            else -> ItemRarity.EPIC
+        }
+        val rarityMult = when (rarity) {
+            ItemRarity.ULTRA_RARE -> 6.2f
+            ItemRarity.SOLAR -> 4.5f
+            else -> 3.2f
+        }
+        val slotIndex = Random.nextInt(6)
+        return buildEquipmentForSlotIndex(
+            slotIndex = slotIndex,
+            userId = userId,
+            safeLvl = safeLvl,
+            rarity = rarity,
+            effectiveTier = rarityMult,
+            sourceLabel = "Obsidian Black-Market Cache"
+        )
+    }
+
+    fun rerollItemPerk(item: InventoryItem): Pair<GearPerkType, Int> {
+        val rarity = item.resolvedRarity()
+        val currentPerk = item.resolvedPerk().first
+        val candidates = when (item.resolvedSlot()) {
+            ItemSlot.WEAPON, ItemSlot.RING -> listOf(
+                GearPerkType.CRIT_CHANCE,
+                GearPerkType.ARMOR_PIERCE,
+                GearPerkType.LIFESTEAL,
+                GearPerkType.SOLAR_SURGE
+            )
+            ItemSlot.ARMOR, ItemSlot.HELM -> listOf(
+                GearPerkType.DAMAGE_REDUCTION,
+                GearPerkType.THORNS,
+                GearPerkType.TURN_REGEN,
+                GearPerkType.EXPEDITION_WARD
+            )
+            ItemSlot.BOOTS, ItemSlot.RELIC -> listOf(
+                GearPerkType.EXPEDITION_WARD,
+                GearPerkType.CRIT_CHANCE,
+                GearPerkType.SOLAR_SURGE,
+                GearPerkType.TURN_REGEN
+            )
+            ItemSlot.CONSUMABLE -> listOf(GearPerkType.NONE)
+        }.filter { it != currentPerk }.ifEmpty { listOf(GearPerkType.CRIT_CHANCE) }
+
+        val chosen = candidates[Random.nextInt(candidates.size)]
+        val tier = rarity.ordinal + 1 + (item.upgradeLevel.toInt() / 3)
+        val value = when (chosen) {
+            GearPerkType.CRIT_CHANCE -> (8 + tier * 4 + Random.nextInt(0, 4)).coerceIn(8, 38)
+            GearPerkType.ARMOR_PIERCE -> (12 + tier * 6 + Random.nextInt(0, 5)).coerceIn(12, 50)
+            GearPerkType.LIFESTEAL -> (6 + tier * 3 + Random.nextInt(0, 3)).coerceIn(6, 26)
+            GearPerkType.SOLAR_SURGE -> (12 + tier * 6 + Random.nextInt(0, 6)).coerceIn(12, 52)
+            GearPerkType.DAMAGE_REDUCTION -> (6 + tier * 4 + Random.nextInt(0, 3)).coerceIn(6, 32)
+            GearPerkType.THORNS -> (10 + tier * 5 + Random.nextInt(0, 4)).coerceIn(10, 42)
+            GearPerkType.EXPEDITION_WARD -> (8 + tier * 4 + Random.nextInt(0, 4)).coerceIn(8, 35)
+            GearPerkType.TURN_REGEN -> (7 + tier * 4 + Random.nextInt(0, 4)).coerceIn(7, 36)
+            GearPerkType.NONE -> 0
+        }
+        return chosen to value
+    }
+
+    private fun buildEquipmentForSlotIndex(
+        slotIndex: Int,
+        userId: String,
+        safeLvl: Int,
+        rarity: ItemRarity,
+        effectiveTier: Float,
+        sourceLabel: String
+    ): InventoryItem = when (slotIndex) {
+        0 -> buildWeaponDrop(userId, safeLvl, rarity, effectiveTier, sourceLabel)
+        1 -> buildArmorDrop(userId, safeLvl, rarity, effectiveTier, sourceLabel)
+        2 -> buildHelmDrop(userId, safeLvl, rarity, effectiveTier, sourceLabel)
+        3 -> buildBootsDrop(userId, safeLvl, rarity, effectiveTier, sourceLabel)
+        4 -> buildRingDrop(userId, safeLvl, rarity, effectiveTier, sourceLabel)
+        5 -> buildRelicDrop(userId, safeLvl, rarity, effectiveTier, sourceLabel)
+        else -> InventoryItem(
+            userId = userId,
+            name = "Sunburst Tonic",
+            slot = ItemSlot.CONSUMABLE.name,
+            rarity = ItemRarity.RARE.name,
+            healAmount = (85 + safeLvl * 16).toLong().coerceIn(50L, 9999L),
+            quantity = 2L,
+            description = "Recovered from $sourceLabel. Restores HP mid-battle or at camp.",
+            perkType = GearPerkType.NONE.name,
+            perkValue = 0L
         )
     }
 
@@ -435,6 +615,92 @@ object ExpeditionEngine {
         )
     }
 
+    private fun buildHelmDrop(
+        userId: String,
+        level: Int,
+        rarity: ItemRarity,
+        effectiveTier: Float,
+        sourceLabel: String
+    ): InventoryItem {
+        val names = when (rarity) {
+            ItemRarity.ULTRA_RARE -> listOf("Crown of Sol Invictus", "Eclipse Sovereign Visor", "Astral Archon Greathelm")
+            ItemRarity.SOLAR -> listOf("Sunspire Crest Casque", "Helios Diadem", "Cinderlord Barbute")
+            ItemRarity.EPIC -> listOf("Obsidian Vanguard Helm", "Astrolabe Sight Hood", "Frostspire Crest")
+            else -> listOf("Bronze Wayfarer Helm", "Sandstone Scout Cowl", "Highland Iron Casque")
+        }
+        val (perk, perkVal) = rollArmorPerk(rarity)
+        return InventoryItem(
+            userId = userId,
+            name = names[Random.nextInt(names.size)],
+            slot = ItemSlot.HELM.name,
+            rarity = rarity.name,
+            attackBonus = (2 + (effectiveTier * 1.8f).roundToInt()).toLong().coerceIn(1L, 9999L),
+            defenseBonus = (6 + level * 2 + (effectiveTier * 4.0f).roundToInt()).toLong().coerceIn(1L, 9999L),
+            hpBonus = (22 + level * 6 + (effectiveTier * 12f).roundToInt()).toLong().coerceIn(1L, 9999L),
+            description = "${perk.formatSummary(perkVal)} • Looted from $sourceLabel.".take(180),
+            perkType = perk.name,
+            perkValue = perkVal.toLong()
+        )
+    }
+
+    private fun buildBootsDrop(
+        userId: String,
+        level: Int,
+        rarity: ItemRarity,
+        effectiveTier: Float,
+        sourceLabel: String
+    ): InventoryItem {
+        val names = when (rarity) {
+            ItemRarity.ULTRA_RARE -> listOf("Greaves of the Eternal Stride", "Starlight Horizon Sabatons", "Singularity Windrunners")
+            ItemRarity.SOLAR -> listOf("Sunstrider Winged Greaves", "Zenith Vanguard Sabatons", "Gale-Forged Treads")
+            ItemRarity.EPIC -> listOf("Obsidian Ridge Greaves", "Canyon Pathfinder Boots", "Frostwalker Treads")
+            else -> listOf("Sandstone Strider Boots", "Bronze March Greaves", "Wayfarer Leather Treads")
+        }
+        val (perk, perkVal) = rollRelicPerk(rarity)
+        return InventoryItem(
+            userId = userId,
+            name = names[Random.nextInt(names.size)],
+            slot = ItemSlot.BOOTS.name,
+            rarity = rarity.name,
+            attackBonus = (3 + level + (effectiveTier * 2.2f).roundToInt()).toLong().coerceIn(1L, 9999L),
+            defenseBonus = (5 + level * 2 + (effectiveTier * 3.5f).roundToInt()).toLong().coerceIn(1L, 9999L),
+            hpBonus = (14 + level * 4 + (effectiveTier * 8f).roundToInt()).toLong().coerceIn(1L, 9999L),
+            energyBonus = (12 + (effectiveTier * 5f).roundToInt()).toLong().coerceIn(1L, 999L),
+            description = "${perk.formatSummary(perkVal)} • Looted from $sourceLabel.".take(180),
+            perkType = perk.name,
+            perkValue = perkVal.toLong()
+        )
+    }
+
+    private fun buildRingDrop(
+        userId: String,
+        level: Int,
+        rarity: ItemRarity,
+        effectiveTier: Float,
+        sourceLabel: String
+    ): InventoryItem {
+        val names = when (rarity) {
+            ItemRarity.ULTRA_RARE -> listOf("Signet of the Black Sun", "Helios Eternal Loop", "Astral Sovereign Band")
+            ItemRarity.SOLAR -> listOf("Sunblood Ruby Signet", "Zenith Arcanist Ring", "Pyreheart Seal")
+            ItemRarity.EPIC -> listOf("Obsidian Fang Band", "Astrolabe Chrono Ring", "Rimefire Loop")
+            else -> listOf("Bronze Sundial Ring", "Canyon Quartz Band", "Strider Signet")
+        }
+        val (perk, perkVal) = rollWeaponPerk(rarity)
+        return InventoryItem(
+            userId = userId,
+            name = names[Random.nextInt(names.size)],
+            slot = ItemSlot.RING.name,
+            rarity = rarity.name,
+            attackBonus = (7 + level * 3 + (effectiveTier * 4.5f).roundToInt()).toLong().coerceIn(1L, 9999L),
+            defenseBonus = (2 + (effectiveTier * 2.0f).roundToInt()).toLong().coerceIn(1L, 9999L),
+            hpBonus = (12 + level * 3 + (effectiveTier * 6f).roundToInt()).toLong().coerceIn(0L, 9999L),
+            energyBonus = (8 + (effectiveTier * 3f).roundToInt()).toLong().coerceIn(1L, 999L),
+            description = "${perk.formatSummary(perkVal)} • Looted from $sourceLabel.".take(180),
+            perkType = perk.name,
+            perkValue = perkVal.toLong()
+        )
+    }
+
     private fun buildRelicDrop(
         userId: String,
         level: Int,
@@ -461,6 +727,65 @@ object ExpeditionEngine {
             description = "${perk.formatSummary(perkVal)} • Looted from $sourceLabel.".take(180),
             perkType = perk.name,
             perkValue = perkVal.toLong()
+        )
+    }
+
+    /**
+     * Forges a custom Weapon, Armor, Helm, Boots, Ring, or Relic directly from gathered materials.
+     * Supports optional Elemental Essence infusion to tag the crafted piece with a live elemental rune.
+     */
+    fun forgeCustomEquipment(
+        userId: String,
+        slot: ItemSlot,
+        tier: ForgeBlueprintTier,
+        heroLevel: Int,
+        chosenElement: ElementalAffinity? = null
+    ): InventoryItem {
+        val safeLvl = heroLevel.coerceAtLeast(1)
+        val critForgeUpgrade = Random.nextFloat() < 0.22f
+        val finalRarity = if (critForgeUpgrade) {
+            when (tier.baseRarity) {
+                ItemRarity.COMMON -> ItemRarity.RARE
+                ItemRarity.RARE -> ItemRarity.EPIC
+                ItemRarity.EPIC -> ItemRarity.SOLAR
+                else -> ItemRarity.SOLAR
+            }
+        } else {
+            tier.baseRarity
+        }
+        val effectiveTier = tier.powerScalar * (if (critForgeUpgrade) 1.18f else 1.0f)
+        val sourceLabel = if (critForgeUpgrade) "Masterwork Critical Forge (${tier.label})" else "Blacksmith Anvil (${tier.label})"
+        val baseItem = when (slot) {
+            ItemSlot.WEAPON -> buildWeaponDrop(userId, safeLvl, finalRarity, effectiveTier, sourceLabel)
+            ItemSlot.ARMOR -> buildArmorDrop(userId, safeLvl, finalRarity, effectiveTier, sourceLabel)
+            ItemSlot.HELM -> buildHelmDrop(userId, safeLvl, finalRarity, effectiveTier, sourceLabel)
+            ItemSlot.BOOTS -> buildBootsDrop(userId, safeLvl, finalRarity, effectiveTier, sourceLabel)
+            ItemSlot.RING -> buildRingDrop(userId, safeLvl, finalRarity, effectiveTier, sourceLabel)
+            ItemSlot.RELIC -> buildRelicDrop(userId, safeLvl, finalRarity, effectiveTier, sourceLabel)
+            ItemSlot.CONSUMABLE -> buildWeaponDrop(userId, safeLvl, finalRarity, effectiveTier, sourceLabel)
+        }
+        val prefix = when (tier) {
+            ForgeBlueprintTier.BRONZE_SURVIVOR -> "Hand-Forged"
+            ForgeBlueprintTier.SUNSTEEL_VANGUARD -> "Sunsteel"
+            ForgeBlueprintTier.OBSIDIAN_MASTERWORK -> "Obsidian"
+            ForgeBlueprintTier.ASTRAL_SOVEREIGN -> "Astral"
+        }
+        val elementPrefix = if (chosenElement != null) "${chosenElement.label} " else ""
+        val slotNoun = when (slot) {
+            ItemSlot.WEAPON -> listOf("Blade", "Waraxe", "Spear", "Claymore").random()
+            ItemSlot.ARMOR -> listOf("Cuirass", "Brigandine", "Plate", "Hauberk").random()
+            ItemSlot.HELM -> listOf("Greathelm", "Visor", "Crown", "Barbute").random()
+            ItemSlot.BOOTS -> listOf("Greaves", "Sabatons", "Striders", "Treads").random()
+            ItemSlot.RING -> listOf("Signet", "Band", "Seal", "Loop").random()
+            ItemSlot.RELIC -> listOf("Astrolabe", "Talisman", "Compass", "Crest").random()
+            ItemSlot.CONSUMABLE -> "Blade"
+        }
+        val runeTag = if (chosenElement != null) " [Rune:${chosenElement.name}]" else ""
+        val forgedName = "$prefix $elementPrefix$slotNoun".take(56)
+        val descWithRune = (baseItem.description.take(152) + runeTag).take(180)
+        return baseItem.copy(
+            name = forgedName,
+            description = descWithRune
         )
     }
 }

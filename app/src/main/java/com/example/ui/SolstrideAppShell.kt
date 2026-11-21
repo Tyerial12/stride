@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Watch
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -83,6 +84,7 @@ import com.example.hardware.VoiceCommandParser
 import com.example.ui.components.InteractiveLootChestDialog
 import com.example.ui.components.SolstrideCard
 import com.example.ui.components.WatchSyncBottomSheet
+import com.example.ui.components.WidgetStudioDialog
 import com.example.ui.screens.BattleScreen
 import com.example.ui.screens.ExpeditionScreen
 import com.example.ui.screens.InventoryScreen
@@ -90,6 +92,9 @@ import com.example.ui.screens.LeaderboardScreen
 import com.example.ui.screens.PetsScreen
 import com.example.ui.theme.LocalSolstrideColors
 import com.example.ui.theme.SolstrideDisplayMode
+import com.example.widget.SolstrideWidgetType
+import com.example.widget.SolstrideWidgetUpdater
+import com.example.widget.WidgetPinResult
 import kotlinx.coroutines.launch
 
 private data class NavItemSpec(
@@ -102,7 +107,9 @@ private data class NavItemSpec(
 @Composable
 fun SolstrideAppShell(
     currentUserId: String,
-    viewModel: SolstrideViewModel
+    viewModel: SolstrideViewModel,
+    pendingWidgetTab: String? = null,
+    onWidgetTabConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -136,6 +143,20 @@ fun SolstrideAppShell(
     val pendingChestModal by viewModel.pendingChestModal.collectAsStateWithLifecycle()
     val lastOpenedChestResult by viewModel.lastOpenedChestResult.collectAsStateWithLifecycle()
     val isOpeningChest by viewModel.isOpeningChest.collectAsStateWithLifecycle()
+    val hardcoreState by viewModel.hardcoreState.collectAsStateWithLifecycle()
+    val widgetStudioOpen by viewModel.widgetStudioOpen.collectAsStateWithLifecycle()
+    val widgetSnapshot by viewModel.widgetSnapshot.collectAsStateWithLifecycle()
+    val widgetAutoSyncConfig by viewModel.widgetAutoSyncConfig.collectAsStateWithLifecycle()
+    val activeWidgetCount by viewModel.activeWidgetCount.collectAsStateWithLifecycle()
+    val isHeroSleeping by viewModel.isHeroSleeping.collectAsStateWithLifecycle()
+    val watchSleepState by viewModel.watchSleepState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(pendingWidgetTab) {
+        if (!pendingWidgetTab.isNullOrBlank()) {
+            viewModel.selectTabByRoute(pendingWidgetTab)
+            onWidgetTabConsumed()
+        }
+    }
 
     val chests = (chestsState as? UiState.Success)?.data.orEmpty()
     val claimableQuestCount = remember(questStatuses) { questStatuses.count { it.canClaim } }
@@ -388,6 +409,17 @@ fun SolstrideAppShell(
                         }
 
                         IconButton(
+                            onClick = { viewModel.openWidgetStudio(true) },
+                            modifier = Modifier.testTag("top_widget_studio_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Widgets,
+                                contentDescription = "Open Home Screen Widget Command Studio",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        IconButton(
                             onClick = { viewModel.toggleDisplayMode() },
                             modifier = Modifier.testTag("display_mode_toggle_button")
                         ) {
@@ -553,7 +585,7 @@ fun SolstrideAppShell(
                             val profile = pState.data
                             val inventory = (inventoryState as? UiState.Success)?.data.orEmpty()
                             val ownedPets = (petsState as? UiState.Success)?.data.orEmpty()
-                            val stats = computeDerivedStats(profile, inventory, equippedPet)
+                            val stats = computeDerivedStats(profile, inventory, equippedPet, hardcoreState)
                             val expeditionLocked = profile.hasActiveExpedition()
                             val expeditionRemainingMs = (profile.activeExpeditionEndMs - currentTimeMs).coerceAtLeast(0L)
 
@@ -564,6 +596,7 @@ fun SolstrideAppShell(
                                     inventory = inventory,
                                     chests = chests,
                                     equippedPet = equippedPet,
+                                    hardcoreState = hardcoreState,
                                     telemetry = stepTelemetry,
                                     todayPedometerSteps = todayPedometerSteps,
                                     dailyStepGoal = settings.dailyStepGoal,
@@ -598,6 +631,16 @@ fun SolstrideAppShell(
                                     onClaimExpedition = { viewModel.claimCompletedExpedition() },
                                     onOpenChest = { chest -> viewModel.promptOpenChest(chest) },
                                     onDismissExpeditionReport = { viewModel.dismissExpeditionReport() },
+                                    onSelectRealm = { viewModel.selectRealm(it) },
+                                    onTriggerWayfarerEvent = { viewModel.triggerWayfarerEvent(it) },
+                                    widgetSnapshot = widgetSnapshot,
+                                    widgetAutoSyncConfig = widgetAutoSyncConfig,
+                                    onOpenWidgetStudio = { viewModel.openWidgetStudio(true) },
+                                    onSyncWidgetsNow = { viewModel.syncWidgetsNow() },
+                                    isHeroSleeping = isHeroSleeping,
+                                    sleepSourceLabel = watchSleepState.sleepSourceLabel,
+                                    activeSleepMinutes = watchSleepState.activeSleepMinutes,
+                                    onWakeHero = { viewModel.wakeHeroFromSleep() },
                                     modifier = contentModifier
                                 )
                                 SolstrideTab.BATTLE -> BattleScreen(
@@ -605,6 +648,7 @@ fun SolstrideAppShell(
                                     stats = stats,
                                     inventory = inventory,
                                     equippedPet = equippedPet,
+                                    hardcoreState = hardcoreState,
                                     battleMode = battleMode,
                                     battle = battleState,
                                     expeditionLocked = expeditionLocked,
@@ -615,10 +659,17 @@ fun SolstrideAppShell(
                                     onStrike = { viewModel.performStrike() },
                                     onSolarSkill = { viewModel.performSolarSkill() },
                                     onGuard = { viewModel.performGuard() },
+                                    onUltimateCombo = { viewModel.performUltimateAndPetCombo() },
                                     onUseElixir = { viewModel.performBattleElixir() },
                                     onRetreat = { viewModel.performRetreat() },
+                                    onToggleHardcoreOath = { viewModel.toggleHardcoreOath() },
+                                    onSelectSolCoinWager = { viewModel.selectSolCoinWager(it) },
                                     onOpenDroppedChest = { chest -> viewModel.promptOpenChest(chest) },
                                     onDismissOutcome = { viewModel.dismissBattleOutcome() },
+                                    isHeroSleeping = isHeroSleeping,
+                                    sleepSourceLabel = watchSleepState.sleepSourceLabel,
+                                    activeSleepMinutes = watchSleepState.activeSleepMinutes,
+                                    onWakeHero = { viewModel.wakeHeroFromSleep() },
                                     modifier = contentModifier
                                 )
                                 SolstrideTab.PETS -> PetsScreen(
@@ -632,6 +683,18 @@ fun SolstrideAppShell(
                                     onEquipPet = { viewModel.equipPet(it) },
                                     onBuyPetFood = { viewModel.buyPetFood(it) },
                                     onBuyPetGear = { viewModel.buyPetGear(it) },
+                                    widgetSnapshot = widgetSnapshot,
+                                    onPinPetWidget = {
+                                        val result = SolstrideWidgetUpdater.requestPinWidget(
+                                            context,
+                                            SolstrideWidgetType.COMPANION_PET
+                                        )
+                                        if (result == WidgetPinResult.PIN_REQUESTED) {
+                                            viewModel.showBannerMessage("Pin prompt sent for Pet Arena Widget! Close Solstride to Feed & Fight Wild Pets.")
+                                        } else {
+                                            viewModel.showBannerMessage("Long-press your Home Screen → Widgets → Solstride → Pet Arena Widget.")
+                                        }
+                                    },
                                     modifier = contentModifier
                                 )
                                 SolstrideTab.INVENTORY -> InventoryScreen(
@@ -640,6 +703,7 @@ fun SolstrideAppShell(
                                     inventory = inventory,
                                     chests = chests,
                                     equippedPet = equippedPet,
+                                    hardcoreState = hardcoreState,
                                     questStatuses = questStatuses,
                                     expeditionLocked = expeditionLocked,
                                     expeditionRemainingMs = expeditionRemainingMs,
@@ -651,9 +715,25 @@ fun SolstrideAppShell(
                                     onTriggerPrestige = { viewModel.performPrestigeRebirth() },
                                     onOpenChest = { chest -> viewModel.promptOpenChest(chest) },
                                     onSelectClass = { viewModel.selectHeroClass(it) },
+                                    onSelectSpecialization = { viewModel.selectClassSpecialization(it) },
+                                    onSelectHeroTitle = { viewModel.selectHeroTitle(it) },
                                     onEquipOrUse = { viewModel.toggleEquipItem(it) },
-                                    onUpgradeItem = { viewModel.upgradeItem(it) },
+                                    onUpgradeItem = { item, useStab -> viewModel.upgradeItem(item, useStab) },
+                                    onRepairItem = { viewModel.repairItem(it) },
+                                    onRepairAllEquipped = { viewModel.repairAllEquippedGear() },
+                                    onRerollItemPerk = { viewModel.rerollItemPerk(it) },
+                                    onAscendItemRarity = { viewModel.ascendItemRarity(it) },
+                                    onSocketRune = { item, aff -> viewModel.socketElementalRune(item, aff) },
+                                    onForgeCustomEquipment = { slot, tier, elem ->
+                                        viewModel.forgeCustomEquipment(slot, tier, elem)
+                                    },
                                     onSalvageItem = { viewModel.salvageItem(it) },
+                                    onBrewAlchemistRecipe = { viewModel.brewAlchemistRecipe(it) },
+                                    onBuyBlackMarketOffer = { viewModel.buyBlackMarketOffer(it) },
+                                    onHireMercenaryContract = { viewModel.hireMercenaryContract(it) },
+                                    onResetAllProgress = { viewModel.resetAllProgress() },
+                                    isHeroSleeping = isHeroSleeping,
+                                    sleepSourceLabel = watchSleepState.sleepSourceLabel,
                                     modifier = contentModifier
                                 )
                                 SolstrideTab.LEADERBOARD -> LeaderboardScreen(
@@ -702,6 +782,28 @@ fun SolstrideAppShell(
             onToggleHealthConnectAllSources = { viewModel.toggleHealthConnectAllSources() },
             onToggleBatteryBatching = { viewModel.toggleBatteryBatching() },
             onToggleHaptics = { viewModel.toggleHaptics() }
+        )
+    }
+
+    if (widgetStudioOpen) {
+        WidgetStudioDialog(
+            snapshot = widgetSnapshot,
+            autoSyncConfig = widgetAutoSyncConfig,
+            activeWidgetCount = activeWidgetCount,
+            currentTimeMs = currentTimeMs,
+            onDismiss = { viewModel.openWidgetStudio(false) },
+            onPinWidget = { widgetType ->
+                val result = SolstrideWidgetUpdater.requestPinWidget(context, widgetType)
+                if (result == WidgetPinResult.PIN_REQUESTED) {
+                    viewModel.showBannerMessage("Pin prompt sent for ${widgetType.title}! Confirm on your launcher.")
+                } else {
+                    viewModel.showBannerMessage("Long-press your Home Screen → Widgets → Solstride to add ${widgetType.title}.")
+                }
+            },
+            onSyncAllWidgets = { viewModel.syncWidgetsNow() },
+            onToggleAutoSync = { enabled -> viewModel.setWidgetAutoSyncEnabled(enabled) },
+            onSelectAutoSyncInterval = { mins -> viewModel.setWidgetAutoSyncInterval(mins) },
+            onNavigateTab = { tab -> viewModel.selectTab(tab) }
         )
     }
 }

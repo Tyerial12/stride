@@ -43,8 +43,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import com.example.data.local.PendingStepBatchEntity
 import com.example.data.model.DerivedHeroStats
+import com.example.data.model.HardcoreRpgState
 import com.example.data.model.HeroProfile
 import com.example.data.model.InventoryItem
 import com.example.data.model.LootChest
@@ -52,19 +55,23 @@ import com.example.data.model.OwnedPet
 import com.example.domain.ExpeditionEngine
 import com.example.domain.ExpeditionOutcomeReport
 import com.example.domain.ProgressionEngine
+import com.example.domain.WayfarerEventSpec
 import com.example.hardware.StepSensorStatus
 import com.example.hardware.StepTrackerTelemetry
 import com.example.ui.components.HeroShowcaseCard
+import com.example.ui.components.HeroSleepingBanner
 import com.example.ui.components.SolCoinBadge
 import com.example.ui.components.SolstrideCard
 import com.example.ui.components.StrideGaugeRing
 import com.example.ui.components.TacticalStatBar
 import com.example.ui.components.TimedExpeditionCard
+import com.example.ui.components.WidgetHubQuickCard
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.LocalSolstrideColors
 import com.example.wear.HealthConnectState
 import com.example.wear.HealthConnectSyncStatus
 import com.example.wear.WatchLinkStatus
+import com.example.widget.WidgetSnapshotState
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -72,6 +79,7 @@ import kotlin.math.roundToInt
 fun ExpeditionScreen(
     profile: HeroProfile,
     stats: DerivedHeroStats,
+    hardcoreState: HardcoreRpgState,
     inventory: List<InventoryItem>,
     chests: List<LootChest>,
     equippedPet: OwnedPet?,
@@ -103,6 +111,16 @@ fun ExpeditionScreen(
     onClaimExpedition: () -> Unit,
     onOpenChest: (LootChest) -> Unit,
     onDismissExpeditionReport: () -> Unit,
+    onSelectRealm: (Int) -> Unit = {},
+    onTriggerWayfarerEvent: (WayfarerEventSpec) -> Unit = {},
+    widgetSnapshot: WidgetSnapshotState = WidgetSnapshotState(),
+    widgetAutoSyncConfig: com.example.widget.WidgetAutoSyncConfig = com.example.widget.WidgetAutoSyncConfig(),
+    onOpenWidgetStudio: () -> Unit = {},
+    onSyncWidgetsNow: () -> Unit = {},
+    isHeroSleeping: Boolean = false,
+    sleepSourceLabel: String = "",
+    activeSleepMinutes: Long = 0L,
+    onWakeHero: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val encounterReady = profile.encounterProgress >= 100L
@@ -115,14 +133,35 @@ fun ExpeditionScreen(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 104.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Visible 2D Hero Character Showcase with Equipped Gear, Relic Aura & Pet
+        if (isHeroSleeping) {
+            item {
+                HeroSleepingBanner(
+                    sleepSourceLabel = sleepSourceLabel,
+                    activeSleepMinutes = activeSleepMinutes,
+                    onWakeHero = onWakeHero
+                )
+            }
+        }
+
+        // Visible 2D Hero Character Showcase with 6-Slot Equipped Gear, Specialization, Title & Pet
         item {
             HeroShowcaseCard(
                 profile = profile,
                 stats = stats,
                 inventory = inventory,
                 equippedPet = equippedPet,
-                compact = true
+                compact = true,
+                isSleeping = isHeroSleeping,
+                sleepSourceLabel = sleepSourceLabel
+            )
+        }
+
+        // Step-Harvested Crafting Material Satchel & Survival Status Bar
+        item {
+            StepHarvestedMaterialSatchelCard(
+                hardcoreState = hardcoreState,
+                sunshards = profile.sunshards,
+                solCoins = profile.solCoins
             )
         }
 
@@ -138,6 +177,17 @@ fun ExpeditionScreen(
                 onTogglePedometer = onTogglePedometer,
                 onResetSession = onResetPedometerSession,
                 onCycleDailyGoal = onCycleDailyStepGoal
+            )
+        }
+
+        // In-App Live Widget Hub & Pin-to-Home Studio Launcher
+        item {
+            WidgetHubQuickCard(
+                snapshot = widgetSnapshot,
+                autoSyncConfig = widgetAutoSyncConfig,
+                currentTimeMs = currentTimeMs,
+                onOpenWidgetStudio = onOpenWidgetStudio,
+                onSyncWidgetsNow = onSyncWidgetsNow
             )
         }
 
@@ -548,43 +598,359 @@ fun ExpeditionScreen(
             }
         }
 
-        // Realm Boss Challenge Callout (+10 Sol Coins per Boss Victory ONLY)
+        // 10-Realm World Map & Interactive Realm Selector
         item {
-            SolstrideCard(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            WorldMapTenRealmsCard(
+                profile = profile,
+                expeditionLocked = expeditionLocked,
+                battleActive = battleActive,
+                onSelectRealm = onSelectRealm,
+                onChallengeBoss = { onEngageBattle(true) }
+            )
+        }
+
+        // Wayfarer Shrines, Step Resource Veins & Obsidian Blood-Oath Gamble Altar
+        item {
+            WayfarerEventsCard(
+                profile = profile,
+                hardcoreState = hardcoreState,
+                expeditionLocked = expeditionLocked,
+                onTriggerEvent = onTriggerWayfarerEvent
+            )
+        }
+    }
+}
+
+@Composable
+private fun StepHarvestedMaterialSatchelCard(
+    hardcoreState: HardcoreRpgState,
+    sunshards: Long,
+    solCoins: Long
+) {
+    val ext = LocalSolstrideColors.current
+    val totalRunes = hardcoreState.unlockedRunesMap.values.sum()
+    SolstrideCard(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "Forge Satchel & Ironstride Oaths",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = "Steps level Hero & Pet • Loot Ore/Herbs/Essence in Battles & Expeditions • Watch Sleep grants up to 50 Sol Coins",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (hardcoreState.hardcoreOathEnabled) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                ) {
+                    Text(
+                        text = "IRONSTRIDE OATH",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            PedometerMetricPill(
+                label = "ORE",
+                value = "${hardcoreState.sunsteelOre}",
+                modifier = Modifier.weight(1f)
+            )
+            PedometerMetricPill(
+                label = "HERBS",
+                value = "${hardcoreState.aetherHerbs}",
+                modifier = Modifier.weight(1f)
+            )
+            PedometerMetricPill(
+                label = "ESSENCE",
+                value = "${hardcoreState.elementalEssence}",
+                modifier = Modifier.weight(1f)
+            )
+            PedometerMetricPill(
+                label = "RUNES",
+                value = "$totalRunes",
+                modifier = Modifier.weight(1f)
+            )
+        }
+        if (hardcoreState.battleWoundStacks > 0 || hardcoreState.shrineBattlesLeft > 0 || hardcoreState.mercenaryBattlesLeft > 0) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (hardcoreState.battleWoundStacks > 0) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                    ) {
+                        Text(
+                            text = "Battle Wounds x${hardcoreState.battleWoundStacks} (-${hardcoreState.battleWoundStacks * 10}% HP/ATK) • Cure at Town",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+                if (hardcoreState.shrineBattlesLeft > 0) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        border = BorderStroke(1.dp, ext.borderStrong)
+                    ) {
+                        Text(
+                            text = "${hardcoreState.shrineBlessingLabel} (${hardcoreState.shrineBattlesLeft}B)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+                if (hardcoreState.mercenaryBattlesLeft > 0) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        border = BorderStroke(1.dp, ext.borderStrong)
+                    ) {
+                        Text(
+                            text = "Mercenary Active (${hardcoreState.mercenaryBattlesLeft}B)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorldMapTenRealmsCard(
+    profile: HeroProfile,
+    expeditionLocked: Boolean,
+    battleActive: Boolean,
+    onSelectRealm: (Int) -> Unit,
+    onChallengeBoss: () -> Unit
+) {
+    val ext = LocalSolstrideColors.current
+    val currentRealmSpec = ProgressionEngine.realmForNumber(profile.currentRealm.toInt())
+    val maxUnlocked = (profile.highestRealmCleared + 1L).coerceAtMost(ProgressionEngine.MAX_REALM).toInt()
+
+    SolstrideCard(modifier = Modifier.fillMaxWidth(), strongBorder = true) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("10-Realm World Atlas", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    text = "Active: Realm ${currentRealmSpec.realmNumber} • ${currentRealmSpec.title} (${currentRealmSpec.affinity.symbol} ${currentRealmSpec.affinity.label})",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontFamily = JetBrainsMonoFontFamily
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                border = BorderStroke(1.dp, ext.borderStrong)
+            ) {
+                Text(
+                    text = "STAGE ${profile.realmStage}/5",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "${currentRealmSpec.subtitle} • Boss: ${currentRealmSpec.bossName} (Rec. Lv.${currentRealmSpec.recommendedLevel})",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            ProgressionEngine.realms.forEach { rSpec ->
+                val isSelected = rSpec.realmNumber == profile.currentRealm.toInt()
+                val isUnlocked = rSpec.realmNumber <= maxUnlocked
+                val isCleared = rSpec.realmNumber <= profile.highestRealmCleared.toInt()
+                Surface(
+                    onClick = { onSelectRealm(rSpec.realmNumber) },
+                    enabled = !expeditionLocked && !battleActive,
+                    shape = RoundedCornerShape(10.dp),
+                    color = when {
+                        isSelected -> MaterialTheme.colorScheme.primaryContainer
+                        isCleared -> MaterialTheme.colorScheme.secondaryContainer
+                        isUnlocked -> MaterialTheme.colorScheme.surfaceVariant
+                        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    },
+                    border = BorderStroke(
+                        width = if (isSelected) 2.dp else 1.dp,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else ext.borderSubtle
+                    ),
+                    modifier = Modifier.testTag("select_realm_${rSpec.realmNumber}")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "R${rSpec.realmNumber} ${rSpec.affinity.symbol}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontFamily = JetBrainsMonoFontFamily,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = rSpec.title,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = when {
+                                isCleared -> "CLEARED"
+                                isUnlocked -> "Lv.${rSpec.recommendedLevel}"
+                                else -> "LOCKED"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = JetBrainsMonoFontFamily,
+                            color = if (isCleared) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.AutoAwesome,
+                    contentDescription = "Boss encounter",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text("${currentRealmSpec.bossName} (Realm ${currentRealmSpec.realmNumber} Boss)", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        text = "Boss Wins: ${profile.trueBossWins} • +${ExpeditionEngine.BOSS_VICTORY_SOL_COINS} Sol Coins, Rune & Boss Chest",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            OutlinedButton(
+                onClick = onChallengeBoss,
+                enabled = !expeditionLocked,
+                modifier = Modifier
+                    .height(48.dp)
+                    .testTag("challenge_boss_button"),
+                border = BorderStroke(1.5.dp, ext.borderStrong)
+            ) {
+                Text("Challenge")
+            }
+        }
+    }
+}
+
+@Composable
+private fun WayfarerEventsCard(
+    profile: HeroProfile,
+    hardcoreState: HardcoreRpgState,
+    expeditionLocked: Boolean,
+    onTriggerEvent: (WayfarerEventSpec) -> Unit
+) {
+    val ext = LocalSolstrideColors.current
+    SolstrideCard(modifier = Modifier.fillMaxWidth()) {
+        Text("Wayfarer Shrines & Blood-Oath Altars", style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = "Spend Stride Energy or Sol Coins on world events for blessings, forge materials & high-roller jackpots",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ProgressionEngine.wayfarerEvents.forEach { ev ->
+                val canAfford = profile.solCoins >= ev.solCoinCost && profile.strideEnergy >= ev.energyCost
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(1.dp, ext.borderSubtle)
                 ) {
                     Row(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.AutoAwesome,
-                            contentDescription = "Boss encounter",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text("${realm.guardianName} (Boss)", style = MaterialTheme.typography.titleSmall)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(ev.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                             Text(
-                                text = "Boss Wins: ${profile.trueBossWins} • +${ExpeditionEngine.BOSS_VICTORY_SOL_COINS} Sol Coins & Boss Chest",
+                                text = ev.subtitle,
                                 style = MaterialTheme.typography.bodySmall,
-                                fontFamily = JetBrainsMonoFontFamily,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            val costText = buildList {
+                                if (ev.solCoinCost > 0L) add("${ev.solCoinCost} Sol Coins")
+                                if (ev.energyCost > 0L) add("${ev.energyCost} Stride Energy")
+                            }.joinToString(" + ")
+                            Text(
+                                text = "Cost: $costText",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = JetBrainsMonoFontFamily,
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         }
-                    }
-                    OutlinedButton(
-                        onClick = { onEngageBattle(true) },
-                        enabled = !expeditionLocked,
-                        modifier = Modifier
-                            .height(48.dp)
-                            .testTag("challenge_boss_button"),
-                        border = BorderStroke(1.5.dp, ext.borderStrong)
-                    ) {
-                        Text("Challenge")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = { onTriggerEvent(ev) },
+                            enabled = !expeditionLocked && canAfford,
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("wayfarer_event_${ev.id}")
+                        ) {
+                            Text(ev.actionLabel)
+                        }
                     }
                 }
             }

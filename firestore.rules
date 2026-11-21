@@ -29,7 +29,7 @@ service cloud.firestore {
     }
 
     function isValidSlot(slot) {
-      return slot is string && slot in ['WEAPON', 'ARMOR', 'RELIC', 'CONSUMABLE'];
+      return slot is string && slot in ['WEAPON', 'ARMOR', 'HELM', 'BOOTS', 'RING', 'RELIC', 'CONSUMABLE'];
     }
 
     function isValidRarity(rarity) {
@@ -109,9 +109,9 @@ service cloud.firestore {
              d.get('activeExpeditionStartMs', 0) >= 0 &&
              d.get('activeExpeditionDurationMin', 0) >= 0 && d.get('activeExpeditionDurationMin', 0) <= 1380 &&
              d.get('activeExpeditionEndMs', 0) >= 0 &&
-             d.get('currentRealm', 1) >= 1 && d.get('currentRealm', 1) <= 5 &&
+             d.get('currentRealm', 1) >= 1 && d.get('currentRealm', 1) <= 10 &&
              d.get('realmStage', 1) >= 1 && d.get('realmStage', 1) <= 5 &&
-             d.get('highestRealmCleared', 0) >= 0 && d.get('highestRealmCleared', 0) <= 5 &&
+             d.get('highestRealmCleared', 0) >= 0 && d.get('highestRealmCleared', 0) <= 10 &&
              d.get('currentSpireFloor', 1) >= 1 &&
              d.get('highestSpireFloor', 0) >= 0 &&
              d.get('prestigeLevel', 0) >= 0 && d.get('prestigeLevel', 0) <= 99 &&
@@ -120,7 +120,7 @@ service cloud.firestore {
              d.get('dailyBattlesWon', 0) >= 0 &&
              d.get('dailyExpeditionsDone', 0) >= 0 &&
              d.get('dailyChestsOpened', 0) >= 0 &&
-             d.get('claimedQuestIds', []).size() <= 40 &&
+             d.get('claimedQuestIds', []).size() <= 80 &&
              d.get('chestsOpenedTotal', 0) >= 0;
     }
 
@@ -266,6 +266,7 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
                          incoming().diff(existing()).affectedKeys().hasOnly([
+                           'name', 'rarity', 'description', 'perkType',
                            'attackBonus', 'defenseBonus', 'hpBonus', 'energyBonus',
                            'upgradeLevel', 'quantity', 'equipped', 'perkValue', 'updatedAt'
                          ]);

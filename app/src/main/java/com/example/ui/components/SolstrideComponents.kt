@@ -257,18 +257,18 @@ fun rarityColorFor(rarity: ItemRarity): Color {
 fun petRarityColorFor(rarity: PetRarity, onDarkSurface: Boolean = false): Color {
     if (onDarkSurface) {
         return when (rarity) {
-            PetRarity.COMMON -> com.example.ui.theme.RarityCommonDark
             PetRarity.RARE -> com.example.ui.theme.RarityRareDark
             PetRarity.EPIC -> com.example.ui.theme.RarityEpicDark
-            PetRarity.LEGENDARY -> com.example.ui.theme.RaritySolarDark
+            PetRarity.SOLAR -> com.example.ui.theme.RaritySolarDark
+            PetRarity.LEGENDARY -> com.example.ui.theme.RarityUltraRareDark
         }
     }
     val ext = LocalSolstrideColors.current
     return when (rarity) {
-        PetRarity.COMMON -> ext.rarityCommon
         PetRarity.RARE -> ext.rarityRare
         PetRarity.EPIC -> ext.rarityEpic
-        PetRarity.LEGENDARY -> ext.raritySolar
+        PetRarity.SOLAR -> ext.raritySolar
+        PetRarity.LEGENDARY -> ext.rarityUltraRare
     }
 }
 
@@ -281,9 +281,9 @@ fun PetRarityBadge(
 ) {
     val accent = petRarityColorFor(rarity, onDarkSurface = onDarkSurface)
     val icon = when (rarity) {
-        PetRarity.COMMON -> Icons.Filled.Shield
-        PetRarity.RARE -> Icons.Filled.Star
-        PetRarity.EPIC -> Icons.Filled.AutoAwesome
+        PetRarity.RARE -> Icons.Filled.Shield
+        PetRarity.EPIC -> Icons.Filled.Star
+        PetRarity.SOLAR -> Icons.Filled.AutoAwesome
         PetRarity.LEGENDARY -> Icons.Filled.WorkspacePremium
     }
     val fillAlpha = when {

@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Gavel
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
@@ -74,11 +76,12 @@ import com.example.ui.components.TacticalStatBar
 import com.example.ui.components.petRarityColorFor
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.LocalSolstrideColors
+import com.example.widget.WidgetSnapshotState
 import java.util.Locale
 
 private enum class PetsSubSection(val label: String) {
     COMPANIONS("Companions (6)"),
-    PET_SHOP("Pet Shop")
+    PET_SHOP("Pet Gear & Widget")
 }
 
 @Composable
@@ -91,8 +94,10 @@ fun PetsScreen(
     onJumpToExpedition: () -> Unit,
     onAdoptPet: (PetType) -> Unit,
     onEquipPet: (PetType) -> Unit,
-    onBuyPetFood: (PetFoodSpec) -> Unit,
+    @Suppress("UNUSED_PARAMETER") onBuyPetFood: (PetFoodSpec) -> Unit,
     onBuyPetGear: (PetGearSpec) -> Unit,
+    widgetSnapshot: WidgetSnapshotState = WidgetSnapshotState(),
+    onPinPetWidget: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var activeSection by remember { mutableStateOf(PetsSubSection.COMPANIONS) }
@@ -192,6 +197,15 @@ fun PetsScreen(
             EquippedCompanionCard(
                 equippedPet = equippedPet,
                 onSwitchToShop = { activeSection = PetsSubSection.PET_SHOP }
+            )
+        }
+
+        // Exclusive Home Screen Pet Arena Widget Card (Only way to level up pets!)
+        item {
+            PetWidgetExclusiveArenaCard(
+                equippedPet = equippedPet,
+                widgetSnapshot = widgetSnapshot,
+                onPinPetWidget = onPinPetWidget
             )
         }
 
@@ -323,9 +337,9 @@ fun PetsScreen(
                             }
                             Text(
                                 text = if (equippedPet != null) {
-                                    "Food levels up your equipped pet's bonus. Weapons & Armor equip directly to it."
+                                    "Weapons & Armor equip directly to your pet. Level up your pet exclusively via the Home Screen Pet Arena Widget while Solstride is closed."
                                 } else {
-                                    "Adopt and equip a companion first to buy Pet Food, Pet Weapons, and Pet Armor."
+                                    "Adopt and equip a companion first to buy Pet Weapons, Pet Armor, and train on the Home Screen Pet Arena Widget."
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer
@@ -335,53 +349,13 @@ fun PetsScreen(
                 }
             }
 
-            // Section: Pet Food
+            // Section: Widget-Exclusive Pet Training Reminder
             item {
                 ShopSectionHeader(
-                    icon = Icons.Filled.Restaurant,
-                    title = "Pet Food (Level Up Equipped Pet)",
-                    subtitle = "Grants Pet XP to permanently boost your companion's unique hero bonus."
+                    icon = Icons.Filled.Widgets,
+                    title = "Pet Leveling (Home Screen Widget Exclusive)",
+                    subtitle = "Close Solstride to unlock the Pet Arena Widget: Feed with Sol Coins / Step Treats & Fight Wild Pets for exclusive Pet XP!"
                 )
-            }
-            items(PetCatalog.foodShop, key = { it.id }) { food ->
-                val canAfford = profile.solCoins >= food.coinCost
-                val enabled = !expeditionLocked && equippedPet != null && canAfford &&
-                    equippedPet.level < PetCatalog.MAX_PET_LEVEL
-                SolstrideCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = food.name, style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                text = "+${food.xpGain} PET XP",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontFamily = JetBrainsMonoFontFamily,
-                                color = MaterialTheme.colorScheme.tertiary
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = food.description,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Button(
-                            onClick = { onBuyPetFood(food) },
-                            enabled = enabled,
-                            modifier = Modifier
-                                .height(48.dp)
-                                .testTag("buy_${food.id}")
-                        ) {
-                            Icon(Icons.Filled.MonetizationOn, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("${food.coinCost}")
-                        }
-                    }
-                }
             }
 
             // Section: Pet Weapons
@@ -496,12 +470,12 @@ private fun EquippedCompanionCard(
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = bonus.summaryText,
+                    text = "${type.elementalAffinity.symbol} ${type.elementalAffinity.label} Affinity • ${bonus.summaryText}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = type.title,
+                    text = "Combat Combo: ${type.activeSkillName} (${type.activeSkillSummary})",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -586,7 +560,181 @@ private fun EquippedCompanionCard(
         ) {
             Icon(Icons.Filled.Storefront, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text("Buy Pet Food, Weapons & Armor")
+            Text("Buy Pet Weapons & Armor")
+        }
+    }
+}
+
+@Composable
+private fun PetWidgetExclusiveArenaCard(
+    equippedPet: OwnedPet?,
+    widgetSnapshot: WidgetSnapshotState,
+    onPinPetWidget: () -> Unit
+) {
+    val ext = LocalSolstrideColors.current
+    SolstrideCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("pet_widget_exclusive_arena_card"),
+        containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.45f),
+        strongBorder = true
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Widgets,
+                    contentDescription = "Pet Arena Widget Exclusive",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Column {
+                    Text(
+                        text = "Pet Arena Home Widget (Only Way to Level)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Feed & Fight Wild Pets on your Home Screen when Solstride is closed",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                border = BorderStroke(1.dp, ext.borderStrong)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Lock,
+                        contentDescription = "Widget locked while app is open",
+                        modifier = Modifier.size(12.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = "LOCKED IN-APP",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Surface(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, ext.borderSubtle)
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Text("MOOD", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = "❤ ${widgetSnapshot.petMoodPct}%",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Surface(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, ext.borderSubtle)
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Text("WILD STAMINA", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = "⚡ ${widgetSnapshot.petWildStamina}/5",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            Surface(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, ext.borderSubtle)
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Text("STEP TREATS", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = "🍖 ${widgetSnapshot.petStepTreats}",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
+            }
+            Surface(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, ext.borderSubtle)
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Text("WILD WINS", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = "🏆 ${widgetSnapshot.petTotalWildWins}",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Last Widget Arena Log: ${widgetSnapshot.petLastBattleSummary}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "• Walk 250 steps = +1 Wild Stamina • Walk 500 steps = +1 Free Treat • Auto-syncs XP, Level-Ups & Forge Ore when Solstride opens, then locks until app closes.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+        Button(
+            onClick = onPinPetWidget,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("pin_pet_arena_widget_button")
+        ) {
+            Icon(Icons.Filled.AddToHomeScreen, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                if (equippedPet != null) "Pin ${equippedPet.resolvedType().displayName} Arena Widget"
+                else "Pin Pet Arena Widget to Home Screen"
+            )
         }
     }
 }
@@ -664,9 +812,17 @@ private fun CompanionRosterCard(
                 }
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
-                    text = if (ownedPet != null) "Lv.${ownedPet.level} • $activeBonusText" else "Lv.1 Bonus: $activeBonusText",
+                    text = "${petType.elementalAffinity.symbol} ${petType.elementalAffinity.label} • " +
+                        if (ownedPet != null) "Lv.${ownedPet.level} • $activeBonusText" else "Lv.1 Bonus: $activeBonusText",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Active Combo: ${petType.activeSkillName} — ${petType.activeSkillSummary}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.tertiary
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(

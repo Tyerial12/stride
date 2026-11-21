@@ -12,6 +12,8 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -56,6 +58,7 @@ object BackgroundSyncGuard {
 
 object StepBackgroundSyncScheduler {
     private const val UNIQUE_WORK_NAME = "solstride_background_step_sync"
+    private const val IMMEDIATE_WORK_NAME = "solstride_widget_immediate_step_sync"
 
     fun ensureScheduled(context: Context) {
         val request = PeriodicWorkRequestBuilder<StepBackgroundSyncWorker>(
@@ -71,6 +74,19 @@ object StepBackgroundSyncScheduler {
             )
         }.onFailure { err ->
             Log.w("StepBgScheduler", "Unable to schedule periodic background step sync: ${err.message}")
+        }
+    }
+
+    fun enqueueImmediateSync(context: Context) {
+        val request = OneTimeWorkRequestBuilder<StepBackgroundSyncWorker>().build()
+        runCatching {
+            WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+                IMMEDIATE_WORK_NAME,
+                ExistingWorkPolicy.REPLACE,
+                request
+            )
+        }.onFailure { err ->
+            Log.w("StepBgScheduler", "Unable to enqueue immediate step sync: ${err.message}")
         }
     }
 }
@@ -183,6 +199,12 @@ class StepBackgroundSyncWorker(
                 flushToCloudInBackground(signedInUid, dao, preferences)
             }
 
+            // 5. Refresh home screen widgets with full Hero, Pet, Hardcore, Step & Watch snapshot
+            com.example.widget.WidgetAutoSyncWorker.refreshFullWidgetSnapshot(
+                context = applicationContext,
+                watchConnectedOverride = wearWatchConnected
+            )
+
             return Result.success()
         } catch (e: CancellationException) {
             throw e
@@ -265,23 +287,24 @@ class StepBackgroundSyncWorker(
         val newTotalSteps = (profile.totalSteps + totalDelta).coerceAtMost(1_000_000_000L)
         val newWeeklySteps = (prevWeekly + totalDelta).coerceAtMost(10_000_000L)
 
-        val onExpedition = profile.hasActiveExpedition()
-        val striderBonus = if (profile.resolvedClass() == HeroClass.STRIDER) 1.20f else 1.0f
-        val energyGain = ((totalDelta / 8.0f) * striderBonus).toLong().coerceAtLeast(1L)
-        val encounterGain = if (onExpedition) 0L else (totalDelta / 5L).coerceAtLeast(1L)
-        val newEnergy = (profile.strideEnergy + energyGain).coerceAtMost(profile.maxStrideEnergy.coerceAtLeast(100L))
-        val newEncounter = if (onExpedition) {
-            profile.encounterProgress
-        } else {
-            (profile.encounterProgress + encounterGain).coerceAtMost(100L)
-        }
+        // Steps are ONLY used to level the Hero (Hero XP) and fuel Pet Arena Widget training
+        val stepXpGain = com.example.domain.ProgressionEngine.computeHeroStepXp(totalDelta)
+        val leveled = com.example.domain.ProgressionEngine.applyStepXpToProfile(
+            profile = profile,
+            xpGain = stepXpGain
+        )
 
         val updateMap = mapOf(
             "totalSteps" to newTotalSteps,
             "weeklySteps" to newWeeklySteps,
             "weekKey" to weekNow,
-            "strideEnergy" to newEnergy,
-            "encounterProgress" to newEncounter
+            "level" to leveled.level,
+            "xp" to leveled.xp,
+            "xpToNextLevel" to leveled.xpToNextLevel,
+            "unspentPoints" to leveled.unspentPoints,
+            "maxHp" to leveled.maxHp,
+            "currentHp" to leveled.currentHp,
+            "heroPower" to leveled.heroPower
         )
 
         val result = repository.updateHeroProfile(uid, updateMap)
@@ -292,12 +315,13 @@ class StepBackgroundSyncWorker(
                 preferences.recordDailyPedometerSteps(currentCalendarDateKey(), watchDelta)
             }
             val sources = batches.map { it.source }.distinct().joinToString(" + ")
+            val lvlTag = if (leveled.level > profile.level) " ★ Lv.${leveled.level}!" else ""
             dao.insertSyncLog(
                 SyncLogEntity(
                     userId = uid,
                     source = "$sources (BG)",
                     stepDelta = totalDelta,
-                    summary = "+$totalDelta closed-app steps -> +$energyGain Energy",
+                    summary = "+$totalDelta closed-app steps -> +$stepXpGain Hero XP$lvlTag & Pet Stamina",
                     timestampMs = System.currentTimeMillis()
                 )
             )
@@ -305,14 +329,29 @@ class StepBackgroundSyncWorker(
                 userId = uid,
                 displayName = profile.displayName,
                 heroClass = profile.heroClass,
-                heroLevel = profile.level,
-                heroPower = profile.heroPower,
+                heroLevel = leveled.level,
+                heroPower = leveled.heroPower,
                 weeklySteps = newWeeklySteps,
                 weekKey = weekNow,
                 bossesDefeated = profile.bossesDefeated,
                 prestigeLevel = profile.prestigeLevel,
                 highestSpireFloor = profile.highestSpireFloor
             )
+            val updatedSettings = preferences.settingsFlow.first()
+            val todayNow = if (updatedSettings.pedometerDateKey == currentCalendarDateKey()) {
+                updatedSettings.pedometerDailySteps
+            } else {
+                0L
+            }
+            com.example.widget.SolstrideWidgetSnapshotStore.updateStepTelemetryOnly(
+                context = applicationContext,
+                todaySteps = todayNow,
+                weeklySteps = newWeeklySteps,
+                strideEnergy = profile.strideEnergy,
+                encounterProgressPct = profile.encounterProgress.toInt(),
+                isWatchConnected = isWearWatchConnectedNow()
+            )
+            com.example.widget.SolstrideWidgetUpdater.updateAllWidgets(applicationContext)
         }
     }
 

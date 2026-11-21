@@ -112,7 +112,7 @@ fun TimedExpeditionCard(
                         }
                     )
                     Text(
-                        text = "${ExpeditionEngine.formatDuration(lastReport.durationMinutes)} • Survival Odds: ${lastReport.survivalChancePct}%",
+                        text = "${ExpeditionEngine.formatDuration(lastReport.durationMinutes)} • Survival: ${lastReport.survivalChancePct}% • +${lastReport.solCoinsEarned} Sol Coins",
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = JetBrainsMonoFontFamily
                     )
@@ -164,6 +164,11 @@ fun TimedExpeditionCard(
         val isComplete = remainingMs <= 0L
         val durationMin = profile.activeExpeditionDurationMin.toInt()
             .coerceIn(ExpeditionEngine.MIN_DURATION_MINUTES, ExpeditionEngine.MAX_DURATION_MINUTES)
+        val elapsedMin = (elapsedMs / 60_000L).toInt().coerceIn(0, durationMin)
+        val liveCoinReward = ExpeditionEngine.computeSolCoinReward(
+            elapsedMinutes = if (isComplete) durationMin else elapsedMin,
+            plannedDurationMinutes = durationMin
+        )
         val forecast = ExpeditionEngine.evaluateRiskForecast(durationMin, stats, profile.level.toInt())
         val riskColor = riskTierColor(forecast.riskTier)
 
@@ -229,12 +234,46 @@ fun TimedExpeditionCard(
                 color = if (isComplete) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.surfaceVariant
             )
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Time Spent: ${liveCoinReward.timeSpentPercent}%",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Text(
+                        text = if (isComplete) {
+                            "+${liveCoinReward.fullSolCoins} Sol Coins Ready"
+                        } else {
+                            "Sol Coins: +${liveCoinReward.earnedSolCoins} / ${liveCoinReward.fullSolCoins}"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = if (isComplete) {
-                    "Your hero has returned! Resolve the survival roll (${forecast.survivalChancePct}% odds) to recover your sealed Expedition Relic Chest."
+                    "Your hero has returned! Resolve the survival roll (${forecast.survivalChancePct}% odds) to claim +${liveCoinReward.fullSolCoins} Sol Coins and your sealed Expedition Relic Chest."
                 } else {
-                    "Hero is locked while exploring (watch steps still auto-sync every 5s). You may stop early anytime to unlock your hero, but you will gain zero rewards."
+                    "Hero is locked while exploring (watch steps still auto-sync). Stopping early awards Sol Coins based on % of time spent (min 5m), but forfeits XP, materials & the chest."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -274,7 +313,11 @@ fun TimedExpeditionCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Stop Expedition Early (No Reward)",
+                        text = if (liveCoinReward.earnedSolCoins > 0L) {
+                            "Recall Early (+${liveCoinReward.earnedSolCoins} Sol Coins)"
+                        } else {
+                            "Stop Expedition Early (0 Coins <5m)"
+                        },
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.titleSmall
                     )
@@ -285,9 +328,15 @@ fun TimedExpeditionCard(
         if (showStopConfirm) {
             AlertDialog(
                 onDismissRequest = { showStopConfirm = false },
-                title = { Text("Stop Expedition Early?") },
+                title = { Text("Recall Expedition Early?") },
                 text = {
-                    Text("Recalling your hero right now will immediately unlock all actions, but you will forfeit ALL XP, Sunshards, and the sealed Expedition Chest. Continue?")
+                    Text(
+                        if (liveCoinReward.earnedSolCoins > 0L) {
+                            "Recalling at ${liveCoinReward.timeSpentPercent}% time spent will unlock your hero and award +${liveCoinReward.earnedSolCoins} Sol Coins, but you will forfeit XP, Sunshards, materials, and the sealed Expedition Chest. Continue?"
+                        } else {
+                            "Less than 5 minutes have elapsed (${liveCoinReward.timeSpentPercent}%). Recalling now unlocks your hero with 0 Sol Coins and forfeits all expedition rewards. Continue?"
+                        }
+                    )
                 },
                 confirmButton = {
                     Button(
@@ -301,7 +350,13 @@ fun TimedExpeditionCard(
                         ),
                         modifier = Modifier.testTag("confirm_stop_expedition_button")
                     ) {
-                        Text("Stop (No Reward)")
+                        Text(
+                            if (liveCoinReward.earnedSolCoins > 0L) {
+                                "Recall (+${liveCoinReward.earnedSolCoins} Coins)"
+                            } else {
+                                "Stop (0 Coins)"
+                            }
+                        )
                     }
                 },
                 dismissButton = {
@@ -418,6 +473,26 @@ fun TimedExpeditionCard(
                 .fillMaxWidth()
                 .testTag("expedition_duration_slider")
         )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Sol Coin Payout (${forecast.durationTimePercent}% of 23h max):",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "+${forecast.expectedSolCoins} Sol Coins",
+                style = MaterialTheme.typography.titleSmall,
+                fontFamily = JetBrainsMonoFontFamily,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        Spacer(modifier = Modifier.height(6.dp))
 
         // Gear Power vs Recommended Survival Requirement Box
         Surface(

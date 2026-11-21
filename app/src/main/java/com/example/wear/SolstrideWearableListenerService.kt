@@ -188,6 +188,24 @@ class SolstrideWearableListenerService :
                         )
                     }
                 }
+
+                WearDataPaths.SLEEP_STATUS -> {
+                    val map = DataMapItem.fromDataItem(event.dataItem).dataMap
+                    val sleeping = map.getBoolean(WearDataPaths.KEY_IS_SLEEPING, false)
+                    val watchName = map.getString(WearDataPaths.KEY_WATCH_NAME)
+                        ?.takeIf { it.isNotBlank() }
+                        ?: "Samsung Galaxy Watch"
+                    serviceScope.launch {
+                        preferences.setWatchLiveSleeping(sleeping, watchName, now)
+                        com.example.widget.SolstrideWidgetSnapshotStore.updateHeroSleepingOnly(
+                            context = applicationContext,
+                            isSleeping = sleeping,
+                            sleepSourceLabel = watchName
+                        )
+                        com.example.widget.SolstrideWidgetUpdater.updateAllWidgets(applicationContext)
+                        Log.d(TAG, "Watch sleep signal received via DataLayer: sleeping=$sleeping ($watchName)")
+                    }
+                }
             }
         }
 
@@ -203,6 +221,8 @@ class SolstrideWearableListenerService :
                 preferences.setLastWatchStepReceivedMs(now)
                 pendingBatches.forEach { dao.insertBatch(it) }
                 Log.d(TAG, "Queued ${pendingBatches.size} step batch(es) from Galaxy Watch")
+                StepBackgroundSyncScheduler.enqueueImmediateSync(applicationContext)
+                com.example.widget.WidgetAutoSyncScheduler.triggerImmediateSync(applicationContext)
             }
         }
     }
@@ -307,6 +327,24 @@ class SolstrideWearableListenerService :
                             synced = false
                         )
                     )
+                    StepBackgroundSyncScheduler.enqueueImmediateSync(applicationContext)
+                    com.example.widget.WidgetAutoSyncScheduler.triggerImmediateSync(applicationContext)
+                }
+            }
+
+            WearDataPaths.SLEEP_STATUS -> {
+                val payload = runCatching { String(messageEvent.data, Charsets.UTF_8).trim().lowercase() }.getOrDefault("")
+                val sleeping = payload == "1" || payload == "true" || payload == "sleeping" || payload == "asleep"
+                val preferences = SolstridePreferences(applicationContext)
+                serviceScope.launch {
+                    preferences.setWatchLiveSleeping(sleeping, "Samsung Galaxy Watch", now)
+                    com.example.widget.SolstrideWidgetSnapshotStore.updateHeroSleepingOnly(
+                        context = applicationContext,
+                        isSleeping = sleeping,
+                        sleepSourceLabel = "Samsung Galaxy Watch"
+                    )
+                    com.example.widget.SolstrideWidgetUpdater.updateAllWidgets(applicationContext)
+                    Log.d(TAG, "Watch sleep message received: sleeping=$sleeping")
                 }
             }
         }
@@ -323,7 +361,12 @@ class SolstrideWearableListenerService :
                 watchName = displayName,
                 heartbeatAckMs = ackMs
             )
-            Log.d(TAG, "Watch verified reachable ($displayName): pausing phone pedometer")
+            com.example.widget.SolstrideWidgetSnapshotStore.updateWatchConnectionOnly(
+                context = applicationContext,
+                isWatchConnected = true
+            )
+            com.example.widget.SolstrideWidgetUpdater.updateAllWidgets(applicationContext)
+            Log.d(TAG, "Watch verified reachable ($displayName): pausing phone pedometer & syncing widgets")
         }
     }
 
@@ -345,7 +388,12 @@ class SolstrideWearableListenerService :
                     nodeId = nodeId,
                     watchName = displayName
                 )
-                Log.d(TAG, "Watch unreachable ($displayName): broadcast sent to activate phone pedometer")
+                com.example.widget.SolstrideWidgetSnapshotStore.updateWatchConnectionOnly(
+                    context = applicationContext,
+                    isWatchConnected = false
+                )
+                com.example.widget.SolstrideWidgetUpdater.updateAllWidgets(applicationContext)
+                Log.d(TAG, "Watch unreachable ($displayName): broadcast sent to activate phone pedometer & sync widgets")
             }
         }
     }

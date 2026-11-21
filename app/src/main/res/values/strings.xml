@@ -29,4 +29,12 @@
     <string name="sol_coins_label">Sol Coins</string>
     <string name="timed_expedition_title">Timed Expeditions</string>
     <string name="health_connect_rationale_title">Health Connect Privacy</string>
+    <string name="widget_command_label">Solstride Battle &amp; Campaign Radar (4x2)</string>
+    <string name="widget_command_desc">Live Realm &amp; Stage, Endless Spire floor, Encounter Radar bar, Unopened Chests, Claimable Quests, Skill Points &amp; Tactical Quick Dock.</string>
+    <string name="widget_hero_label">Solstride Hero Build &amp; Forge (3x2)</string>
+    <string name="widget_hero_desc">Hero HP &amp; Stride Energy, ATK/DEF/CRIT stats, 6-Slot Gear Loadout, Durability/Wound alerts, Forge Materials &amp; Anvil shortcut.</string>
+    <string name="widget_pet_label">Solstride Interactive Pet Arena (4x2)</string>
+    <string name="widget_pet_desc">Exclusive Home-Screen Pet Leveling! Feed treats &amp; Fight Wild Pets while app is closed — auto-syncs &amp; locks when app opens.</string>
+    <string name="widget_steps_label">Solstride Steps, Sleep &amp; Expedition (3x2)</string>
+    <string name="widget_steps_desc">Daily &amp; Weekly Steps, Galaxy Watch link, Real-Life Watch Sleep status, Pet Stamina step countdown &amp; live Timed Expedition timer.</string>
 </resources>

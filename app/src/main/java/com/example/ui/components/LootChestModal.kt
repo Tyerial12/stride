@@ -137,6 +137,12 @@ fun InteractiveLootChestDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
                     )
+                    Text(
+                        text = "Chest permanently consumed • Cannot be opened again",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                        textAlign = TextAlign.Center
+                    )
 
                     Spacer(modifier = Modifier.height(14.dp))
 
@@ -374,7 +380,15 @@ fun InteractiveLootChestDialog(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Single-use chest • Permanently consumed once opened",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     Button(
                         onClick = { onTapOpenChest(pendingChest) },
@@ -455,7 +469,7 @@ fun LootVaultSection(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        text = "Tap any sealed chest to roll weapons, armor & Ultra Rare relics",
+                        text = "Single-use chests • Permanently consumed once opened",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

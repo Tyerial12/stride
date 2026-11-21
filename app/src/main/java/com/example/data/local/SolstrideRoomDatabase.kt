@@ -57,6 +57,12 @@ interface OfflineSyncDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSyncLog(log: SyncLogEntity)
+
+    @Query("DELETE FROM pending_step_batches WHERE userId = :userId")
+    suspend fun deleteAllBatchesForUser(userId: String)
+
+    @Query("DELETE FROM sync_logs WHERE userId = :userId")
+    suspend fun deleteAllLogsForUser(userId: String)
 }
 
 @Database(

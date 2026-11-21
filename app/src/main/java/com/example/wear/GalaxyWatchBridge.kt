@@ -56,11 +56,14 @@ object WearDataPaths {
     const val REQUEST_STEPS_SYNC = "/solstride/request_steps"
     const val HERO_HUD_SYNC = "/solstride/hero_state"
     const val ENCOUNTER_ALERT = "/solstride/encounter_alert"
+    const val SLEEP_STATUS = "/solstride/sleep_status"
     const val KEY_STEPS_DELTA = "steps_delta"
     const val KEY_BATCH_ID = "batch_id"
     const val KEY_TIMESTAMP = "recorded_at_ms"
     const val KEY_WATCH_CONNECTED = "watch_connected"
     const val KEY_WATCH_NAME = "watch_name"
+    const val KEY_IS_SLEEPING = "is_sleeping"
+    const val KEY_SLEEP_MINUTES = "sleep_minutes"
 }
 
 /**

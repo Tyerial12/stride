@@ -9,6 +9,7 @@ import androidx.annotation.RequiresApi
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.HealthConnectFeatures
 import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.metadata.DataOrigin
 import androidx.health.connect.client.records.metadata.Device
@@ -31,6 +32,16 @@ enum class HealthConnectState {
     CONNECTED
 }
 
+data class WatchSleepSnapshot(
+    val isSleepingNow: Boolean = false,
+    val activeSleepMinutes: Long = 0L,
+    val activeSessionMarkerMs: Long = 0L,
+    val sleepSourceLabel: String = "",
+    val latestCompletedEndMs: Long = 0L,
+    val latestCompletedDurationMinutes: Long = 0L,
+    val sleepPermissionGranted: Boolean = false
+)
+
 data class HealthConnectSyncStatus(
     val state: HealthConnectState = HealthConnectState.UNAVAILABLE,
     val primaryWatchSource: String = "Health Connect",
@@ -42,6 +53,7 @@ data class HealthConnectSyncStatus(
     val phoneStepsIgnoredToday: Long = 0L,
     val backgroundReadSupported: Boolean = false,
     val backgroundReadGranted: Boolean = false,
+    val sleepPermissionGranted: Boolean = false,
     val lastSyncedAtMs: Long = 0L,
     val lastError: String? = null
 )
@@ -110,7 +122,10 @@ class HealthConnectStepReader(
 
     fun requestablePermissions(): Set<String> {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return emptySet()
-        val perms = linkedSetOf(HealthPermission.getReadPermission(StepsRecord::class))
+        val perms = linkedSetOf(
+            HealthPermission.getReadPermission(StepsRecord::class),
+            HealthPermission.getReadPermission(SleepSessionRecord::class)
+        )
         if (_status.value.backgroundReadSupported) {
             perms.add(HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND)
         }
@@ -168,6 +183,7 @@ class HealthConnectStepReader(
                     val client = HealthConnectClient.getOrCreate(appContext)
                     val granted = client.permissionController.getGrantedPermissions()
                     val coreRead = HealthPermission.getReadPermission(StepsRecord::class)
+                    val sleepRead = HealthPermission.getReadPermission(SleepSessionRecord::class)
                     val bgSupported = runCatching {
                         client.features.getFeatureStatus(
                             HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_IN_BACKGROUND
@@ -186,6 +202,7 @@ class HealthConnectStepReader(
                         samsungHealthInstalled = samsungInstalled,
                         backgroundReadSupported = bgSupported,
                         backgroundReadGranted = bgGranted,
+                        sleepPermissionGranted = granted.contains(sleepRead),
                         lastError = null
                     )
                     _status.value = s
@@ -556,6 +573,131 @@ class HealthConnectStepReader(
         return map.entries.joinToString(";") { (id, entry) ->
             val safeId = id.replace("|", "_").replace(";", "_")
             "$safeId|${entry.syncedCount}|${entry.endMs}"
+        }
+    }
+
+    /**
+     * Reads real smartwatch sleep sessions from Health Connect (SleepSessionRecord) and combines
+     * them with any live Wear OS watch sleep status signal so the Hero automatically enters
+     * Sleeping Mode when real-life watch sleep is detected and wakes up Well-Rested afterward.
+     */
+    suspend fun readWatchSleepSnapshot(): WatchSleepSnapshot {
+        val (liveWearSleeping, liveWearSinceMs, liveWearSource) = preferences.readWatchLiveSleepTriple()
+        val nowMs = System.currentTimeMillis()
+        val liveWearActive = liveWearSleeping && liveWearSinceMs > 0L && (nowMs - liveWearSinceMs) < 16L * 3600_000L
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return WatchSleepSnapshot(
+                isSleepingNow = liveWearActive,
+                activeSleepMinutes = if (liveWearActive) ((nowMs - liveWearSinceMs) / 60_000L).coerceAtLeast(1L) else 0L,
+                activeSessionMarkerMs = if (liveWearActive) liveWearSinceMs else 0L,
+                sleepSourceLabel = if (liveWearActive) liveWearSource else "",
+                sleepPermissionGranted = false
+            )
+        }
+        return readWatchSleepSnapshotApi26(liveWearActive, liveWearSinceMs, liveWearSource, nowMs)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private suspend fun readWatchSleepSnapshotApi26(
+        liveWearActive: Boolean,
+        liveWearSinceMs: Long,
+        liveWearSource: String,
+        nowMs: Long
+    ): WatchSleepSnapshot {
+        return try {
+            val sdkStatus = HealthConnectClient.getSdkStatus(appContext, PROVIDER_PACKAGE_NAME)
+            if (sdkStatus != HealthConnectClient.SDK_AVAILABLE) {
+                return WatchSleepSnapshot(
+                    isSleepingNow = liveWearActive,
+                    activeSleepMinutes = if (liveWearActive) ((nowMs - liveWearSinceMs) / 60_000L).coerceAtLeast(1L) else 0L,
+                    activeSessionMarkerMs = if (liveWearActive) liveWearSinceMs else 0L,
+                    sleepSourceLabel = if (liveWearActive) liveWearSource else "",
+                    sleepPermissionGranted = false
+                )
+            }
+            val client = HealthConnectClient.getOrCreate(appContext)
+            val granted = client.permissionController.getGrantedPermissions()
+            val sleepPerm = HealthPermission.getReadPermission(SleepSessionRecord::class)
+            val hasSleepPerm = granted.contains(sleepPerm)
+            _status.value = _status.value.copy(sleepPermissionGranted = hasSleepPerm)
+
+            if (!hasSleepPerm) {
+                return WatchSleepSnapshot(
+                    isSleepingNow = liveWearActive,
+                    activeSleepMinutes = if (liveWearActive) ((nowMs - liveWearSinceMs) / 60_000L).coerceAtLeast(1L) else 0L,
+                    activeSessionMarkerMs = if (liveWearActive) liveWearSinceMs else 0L,
+                    sleepSourceLabel = if (liveWearActive) liveWearSource else "",
+                    sleepPermissionGranted = false
+                )
+            }
+
+            val endInstant = Instant.now()
+            val startInstant = endInstant.minusSeconds(LOOKBACK_SECONDS)
+            val response = client.readRecords(
+                ReadRecordsRequest(
+                    recordType = SleepSessionRecord::class,
+                    timeRangeFilter = TimeRangeFilter.between(startInstant, endInstant)
+                )
+            )
+            // Prefer watch/wearable or Samsung Health sleep sessions; exclude purely self-origin records
+            val watchSessions = response.records
+                .filter { rec ->
+                    val pkg = rec.metadata.dataOrigin.packageName
+                    val devType = rec.metadata.device?.type
+                    !isPhoneOnlyRecord(pkg, devType) || isSamsungHealthOrigin(pkg)
+                }
+                .sortedByDescending { it.endTime.toEpochMilli() }
+
+            val latest = watchSessions.firstOrNull()
+            if (latest == null) {
+                return WatchSleepSnapshot(
+                    isSleepingNow = liveWearActive,
+                    activeSleepMinutes = if (liveWearActive) ((nowMs - liveWearSinceMs) / 60_000L).coerceAtLeast(1L) else 0L,
+                    activeSessionMarkerMs = if (liveWearActive) liveWearSinceMs else 0L,
+                    sleepSourceLabel = if (liveWearActive) liveWearSource else "",
+                    sleepPermissionGranted = true
+                )
+            }
+
+            val sessionStartMs = latest.startTime.toEpochMilli()
+            val sessionEndMs = latest.endTime.toEpochMilli()
+            val durationMin = ((sessionEndMs - sessionStartMs) / 60_000L).coerceAtLeast(1L)
+            val sourceLabel = mapOriginToSourceLabel(
+                latest.metadata.dataOrigin.packageName,
+                latest.metadata.device?.type
+            )
+
+            // Active if Health Connect reports a sleep session covering "now" or ending within the last 12 minutes
+            val hcActiveNow = sessionEndMs >= (nowMs - 12L * 60_000L)
+            val isSleeping = liveWearActive || hcActiveNow
+            val activeDuration = when {
+                liveWearActive -> ((nowMs - liveWearSinceMs) / 60_000L).coerceAtLeast(durationMin)
+                hcActiveNow -> durationMin
+                else -> 0L
+            }
+            val activeMarker = if (liveWearActive) liveWearSinceMs else sessionStartMs
+
+            WatchSleepSnapshot(
+                isSleepingNow = isSleeping,
+                activeSleepMinutes = activeDuration,
+                activeSessionMarkerMs = if (isSleeping) activeMarker else 0L,
+                sleepSourceLabel = if (liveWearActive) liveWearSource else sourceLabel,
+                latestCompletedEndMs = if (!hcActiveNow && durationMin >= 10L) sessionEndMs else 0L,
+                latestCompletedDurationMinutes = if (!hcActiveNow && durationMin >= 10L) durationMin else 0L,
+                sleepPermissionGranted = true
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Watch sleep check skipped: ${e.message}")
+            WatchSleepSnapshot(
+                isSleepingNow = liveWearActive,
+                activeSleepMinutes = if (liveWearActive) ((nowMs - liveWearSinceMs) / 60_000L).coerceAtLeast(1L) else 0L,
+                activeSessionMarkerMs = if (liveWearActive) liveWearSinceMs else 0L,
+                sleepSourceLabel = if (liveWearActive) liveWearSource else "",
+                sleepPermissionGranted = _status.value.sleepPermissionGranted
+            )
         }
     }
 

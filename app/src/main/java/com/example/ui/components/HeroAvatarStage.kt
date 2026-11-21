@@ -27,8 +27,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.WorkspacePremium
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -96,6 +100,77 @@ private fun petAccentColor(petType: PetType): Color = when (petType) {
     PetType.SOLAR_PHOENIX -> Color(0xFFFF4D6D)
 }
 
+@Composable
+fun HeroSleepingBanner(
+    sleepSourceLabel: String,
+    activeSleepMinutes: Long,
+    onWakeHero: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("hero_sleeping_banner"),
+        shape = MaterialTheme.shapes.large,
+        color = Color(0xFF141B36),
+        border = BorderStroke(1.5.dp, Color(0xFF7C9BFF))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Bedtime,
+                contentDescription = "Hero sleeping from watch sleep detection",
+                tint = Color(0xFFA5B4FC),
+                modifier = Modifier.size(28.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Hero Sleeping • Watch Rest Active",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFEEF2FF)
+                )
+                val sleepReward = com.example.domain.ProgressionEngine.computeSleepSolCoinReward(activeSleepMinutes)
+                val durText = if (activeSleepMinutes > 0L) {
+                    val h = activeSleepMinutes / 60L
+                    val m = activeSleepMinutes % 60L
+                    if (h > 0L) "${h}h ${m}m" else "${m}m"
+                } else {
+                    "Live"
+                }
+                Text(
+                    text = "${sleepSourceLabel.ifBlank { "Smartwatch" }} ($durText • ${sleepReward.sleepPercent}%) — Grants +${sleepReward.solCoinsEarned}/50 Sol Coins, HP, Energy & cures Wounds.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFC7D2FE)
+                )
+            }
+            Button(
+                onClick = onWakeHero,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF6366F1),
+                    contentColor = Color.White
+                ),
+                modifier = Modifier
+                    .height(48.dp)
+                    .testTag("wake_hero_now_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.WbSunny,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Wake")
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun HeroShowcaseCard(
@@ -104,11 +179,16 @@ fun HeroShowcaseCard(
     inventory: List<InventoryItem>,
     equippedPet: OwnedPet?,
     modifier: Modifier = Modifier,
-    compact: Boolean = false
+    compact: Boolean = false,
+    isSleeping: Boolean = false,
+    sleepSourceLabel: String = ""
 ) {
     val ext = LocalSolstrideColors.current
     val weapon = remember(inventory) { inventory.firstOrNull { it.equipped && it.resolvedSlot() == ItemSlot.WEAPON } }
     val armor = remember(inventory) { inventory.firstOrNull { it.equipped && it.resolvedSlot() == ItemSlot.ARMOR } }
+    val helm = remember(inventory) { inventory.firstOrNull { it.equipped && it.resolvedSlot() == ItemSlot.HELM } }
+    val boots = remember(inventory) { inventory.firstOrNull { it.equipped && it.resolvedSlot() == ItemSlot.BOOTS } }
+    val ring = remember(inventory) { inventory.firstOrNull { it.equipped && it.resolvedSlot() == ItemSlot.RING } }
     val relic = remember(inventory) { inventory.firstOrNull { it.equipped && it.resolvedSlot() == ItemSlot.RELIC } }
 
     val infinite = rememberInfiniteTransition(label = "hero_idle")
@@ -124,6 +204,12 @@ fun HeroShowcaseCard(
         animationSpec = infiniteRepeatable(tween(1500, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "aura_pulse"
     )
+    val sleepDrift by infinite.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(2200, easing = LinearEasing), RepeatMode.Restart),
+        label = "sleep_drift"
+    )
 
     val prestigeBadge = ProgressionEngine.prestigeRomanNumeral(profile.prestigeLevel.toInt())
 
@@ -133,92 +219,181 @@ fun HeroShowcaseCard(
             .testTag("hero_showcase_card"),
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(2.dp, ext.borderStrong)
+        border = BorderStroke(2.dp, if (isSleeping) Color(0xFF7C9BFF) else ext.borderStrong)
     ) {
         Column {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(if (compact) 152.dp else 174.dp)
+                    .height(if (compact) 166.dp else 188.dp)
                     .background(
                         Brush.verticalGradient(
-                            colors = listOf(Color(0xFF161925), Color(0xFF232136), Color(0xFF2D1E17))
+                            colors = if (isSleeping) {
+                                listOf(Color(0xFF0A0F29), Color(0xFF151E42), Color(0xFF1D243C))
+                            } else {
+                                listOf(Color(0xFF161925), Color(0xFF232136), Color(0xFF2D1E17))
+                            }
                         )
                     )
             ) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val groundY = size.height * 0.80f
-                    // Sunlit sky halo
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                Color(0x44FFB800),
-                                Color(0x16FF6B35),
-                                Color.Transparent
+                    if (isSleeping) {
+                        // Moonlit aura & crescent moon with twinkling night stars
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0x44818CF8),
+                                    Color(0x186366F1),
+                                    Color.Transparent
+                                ),
+                                center = Offset(size.width * 0.25f, size.height * 0.42f),
+                                radius = size.height * 0.65f
                             ),
-                            center = Offset(size.width * 0.28f, size.height * 0.42f),
-                            radius = size.height * 0.65f
-                        ),
-                        radius = size.height * 0.65f,
-                        center = Offset(size.width * 0.28f, size.height * 0.42f)
-                    )
-                    // Desert horizon & sunlit stone dais
+                            radius = size.height * 0.65f,
+                            center = Offset(size.width * 0.25f, size.height * 0.42f)
+                        )
+                        val moonCenter = Offset(size.width * 0.11f, size.height * 0.20f)
+                        drawCircle(
+                            color = Color(0xFFE0E7FF),
+                            radius = 12.dp.toPx(),
+                            center = moonCenter
+                        )
+                        drawCircle(
+                            color = Color(0xFF0E1535),
+                            radius = 10.dp.toPx(),
+                            center = Offset(moonCenter.x + 5.dp.toPx(), moonCenter.y - 3.dp.toPx())
+                        )
+                        val starCoords = listOf(
+                            Offset(size.width * 0.20f, size.height * 0.15f),
+                            Offset(size.width * 0.34f, size.height * 0.18f),
+                            Offset(size.width * 0.06f, size.height * 0.38f),
+                            Offset(size.width * 0.37f, size.height * 0.34f)
+                        )
+                        starCoords.forEachIndexed { idx, pt ->
+                            val alpha = (0.35f + 0.55f * ((sin(breathPhase + idx * 1.3f) + 1f) * 0.5f))
+                            drawCircle(
+                                color = Color(0xFFE0E7FF).copy(alpha = alpha),
+                                radius = (1.6f + (idx % 2) * 0.7f).dp.toPx(),
+                                center = pt
+                            )
+                        }
+                    } else {
+                        // Sunlit sky halo
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0x44FFB800),
+                                    Color(0x16FF6B35),
+                                    Color.Transparent
+                                ),
+                                center = Offset(size.width * 0.25f, size.height * 0.42f),
+                                radius = size.height * 0.65f
+                            ),
+                            radius = size.height * 0.65f,
+                            center = Offset(size.width * 0.25f, size.height * 0.42f)
+                        )
+                    }
+                    // Horizon & stone dais
                     drawRect(
-                        color = Color(0xFF3A281E),
+                        color = if (isSleeping) Color(0xFF1F2744) else Color(0xFF3A281E),
                         topLeft = Offset(0f, groundY),
                         size = Size(size.width, size.height - groundY)
                     )
                     drawLine(
-                        color = Color(0x66FFD166),
+                        color = if (isSleeping) Color(0x66818CF8) else Color(0x66FFD166),
                         start = Offset(0f, groundY),
                         end = Offset(size.width, groundY),
                         strokeWidth = 2.dp.toPx()
                     )
 
-                    val heroCenterX = size.width * 0.27f
-                    val heroBob = sin(breathPhase) * 3.5.dp.toPx()
+                    val heroCenterX = size.width * 0.25f
+                    val heroBob = if (isSleeping) {
+                        sin(breathPhase * 0.5f) * 1.8.dp.toPx() + 5.dp.toPx()
+                    } else {
+                        sin(breathPhase) * 3.5.dp.toPx()
+                    }
                     drawHeroSprite(
                         centerX = heroCenterX,
                         groundY = groundY,
-                        scale = if (compact) 0.92f else 1.05f,
+                        scale = if (compact) 0.90f else 1.02f,
                         bobY = heroBob,
                         heroClass = profile.resolvedClass(),
                         weaponRarity = weapon?.resolvedRarity(),
-                        armorRarity = armor?.resolvedRarity(),
-                        relicRarity = relic?.resolvedRarity(),
+                        armorRarity = armor?.resolvedRarity() ?: helm?.resolvedRarity(),
+                        relicRarity = relic?.resolvedRarity() ?: ring?.resolvedRarity(),
                         prestigeLevel = profile.prestigeLevel.toInt(),
-                        auraPulse = auraPulse,
+                        auraPulse = if (isSleeping) 0.45f else auraPulse,
                         facingRight = true,
                         swingProgress = 0f,
                         guardAlpha = 0f
                     )
 
                     if (equippedPet != null) {
-                        val petBob = sin(breathPhase + 1.4f) * 4.dp.toPx()
+                        val petBob = if (isSleeping) {
+                            sin(breathPhase * 0.5f + 1.0f) * 1.5.dp.toPx() + 3.dp.toPx()
+                        } else {
+                            sin(breathPhase + 1.4f) * 4.dp.toPx()
+                        }
                         drawPetSprite(
-                            centerX = heroCenterX - 52.dp.toPx(),
+                            centerX = heroCenterX - 50.dp.toPx(),
                             groundY = groundY - 6.dp.toPx() + petBob,
                             petType = equippedPet.resolvedType(),
-                            scale = if (compact) 0.82f else 0.92f
+                            scale = if (compact) 0.80f else 0.90f
                         )
                     }
                 }
 
-                // Right-side Hero Info Overlay
+                // Floating moonlit Z z z particles when Hero is sleeping
+                if (isSleeping) {
+                    val driftOffsetDp = (sleepDrift * 14f).dp
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = 66.dp, top = (24.dp - driftOffsetDp).coerceAtLeast(6.dp)),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Z  z  z",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFFC7D2FE).copy(alpha = 0.55f + 0.45f * (1f - sleepDrift))
+                        )
+                    }
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = 10.dp, bottom = 8.dp),
+                        shape = RoundedCornerShape(999.dp),
+                        color = Color(0xCC1E293B),
+                        border = BorderStroke(1.dp, Color(0xFF818CF8))
+                    ) {
+                        Text(
+                            text = "🌙 Sleeping • ${sleepSourceLabel.ifBlank { "Watch Rest" }}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFFE0E7FF),
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+
+                // Right-side Hero Info Overlay (6-Slot Equipment Grid)
                 Column(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
-                        .fillMaxWidth(0.57f)
-                        .padding(end = 14.dp, top = 10.dp, bottom = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                        .fillMaxWidth(0.60f)
+                        .padding(end = 12.dp, top = 8.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Text(
                             text = profile.displayName,
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
                             color = Color(0xFFFFF8E7),
                             maxLines = 1
                         )
@@ -238,35 +413,56 @@ fun HeroShowcaseCard(
                         }
                     }
                     Text(
-                        text = "LVL ${profile.level} ${profile.resolvedClass().displayTitle.uppercase()} • R${profile.currentRealm}-${profile.realmStage}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color(0xFFFFD166),
-                        fontFamily = JetBrainsMonoFontFamily
+                        text = "LVL ${profile.level} ${stats.activeSpecialization.title.uppercase()} • ${stats.activeTitle.title}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isSleeping) Color(0xFFA5B4FC) else Color(0xFFFFD166),
+                        fontFamily = JetBrainsMonoFontFamily,
+                        maxLines = 1
                     )
                     Text(
-                        text = "PWR ${stats.computedHeroPower} • GEAR ${stats.gearPowerScore}",
-                        style = MaterialTheme.typography.labelMedium,
+                        text = "PWR ${stats.computedHeroPower} • ${stats.primaryAffinity.symbol} ${stats.primaryAffinity.label.uppercase()} • R${profile.currentRealm}-${profile.realmStage}",
+                        style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF86EFAC),
-                        fontFamily = JetBrainsMonoFontFamily
+                        fontFamily = JetBrainsMonoFontFamily,
+                        maxLines = 1
                     )
                     Spacer(modifier = Modifier.height(2.dp))
-                    GearSlotMiniLine("WPN", weapon)
-                    GearSlotMiniLine("ARM", armor)
-                    GearSlotMiniLine("RLC", relic)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            GearSlotMiniLine("WPN", weapon)
+                            GearSlotMiniLine("ARM", armor)
+                            GearSlotMiniLine("HLM", helm)
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            GearSlotMiniLine("BTS", boots)
+                            GearSlotMiniLine("RNG", ring)
+                            GearSlotMiniLine("RLC", relic)
+                        }
+                    }
                 }
             }
 
-            // Active Gear Set Resonance & Combat Perk Strip
+            // Active Gear Set Resonance, Specialization, Wounds & Combat Perk Strip
             val activePerks = remember(stats) {
                 buildList {
                     if (stats.setBonus.activeTier != null) add(stats.setBonus.label)
+                    add("Ult: ${stats.activeSpecialization.ultimateName}")
+                    if (stats.woundPenaltyPercent > 0) add("WOUNDED -${stats.woundPenaltyPercent}%")
+                    if (stats.brokenGearCount > 0) add("${stats.brokenGearCount} SHATTERED GEAR")
+                    if (stats.mercenarySummary.isNotBlank()) add(stats.mercenarySummary)
                     if (stats.critChancePercent > 8) add("Crit ${stats.critChancePercent}%")
                     if (stats.armorPiercePercent > 0) add("Pierce ${stats.armorPiercePercent}%")
                     if (stats.lifestealPercent > 0) add("Leech ${stats.lifestealPercent}%")
                     if (stats.damageReductionPercent > 0) add("-${stats.damageReductionPercent}% DMG")
-                    if (stats.thornsPercent > 0) add("Thorns ${stats.thornsPercent}%")
-                    if (stats.expeditionWardPercent > 0) add("+${stats.expeditionWardPercent}% Survive")
-                    if (stats.turnRegenHp > 0) add("+${stats.turnRegenHp} Regen")
                 }
             }
             if (activePerks.isNotEmpty()) {
@@ -279,10 +475,22 @@ fun HeroShowcaseCard(
                 ) {
                     activePerks.forEachIndexed { idx, chip ->
                         val isSet = idx == 0 && stats.setBonus.activeTier != null
+                        val isWarning = chip.startsWith("WOUNDED") || chip.contains("SHATTERED")
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = if (isSet) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                            border = BorderStroke(1.dp, if (isSet) MaterialTheme.colorScheme.primary else ext.borderSubtle)
+                            color = when {
+                                isWarning -> MaterialTheme.colorScheme.errorContainer
+                                isSet -> MaterialTheme.colorScheme.primaryContainer
+                                else -> MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            border = BorderStroke(
+                                1.dp,
+                                when {
+                                    isWarning -> MaterialTheme.colorScheme.error
+                                    isSet -> MaterialTheme.colorScheme.primary
+                                    else -> ext.borderSubtle
+                                }
+                            )
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
@@ -301,8 +509,12 @@ fun HeroShowcaseCard(
                                     text = chip,
                                     style = MaterialTheme.typography.labelSmall,
                                     fontFamily = JetBrainsMonoFontFamily,
-                                    fontWeight = if (isSet) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSet) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                    fontWeight = if (isSet || isWarning) FontWeight.Bold else FontWeight.Medium,
+                                    color = when {
+                                        isWarning -> MaterialTheme.colorScheme.onErrorContainer
+                                        isSet -> MaterialTheme.colorScheme.onPrimaryContainer
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    }
                                 )
                             }
                         }
@@ -316,12 +528,13 @@ fun HeroShowcaseCard(
 @Composable
 private fun GearSlotMiniLine(prefix: String, item: InventoryItem?) {
     val accent = gearAccentColor(item?.resolvedRarity())
+    val runeTag = item?.resolvedRune()?.symbol?.let { " $it" } ?: ""
     val name = item?.let {
-        if (it.upgradeLevel > 0L) "${it.name} +${it.upgradeLevel}" else it.name
-    } ?: "Empty Slot"
+        if (it.upgradeLevel > 0L) "+${it.upgradeLevel}$runeTag ${it.name}" else "${it.name}$runeTag"
+    } ?: "Empty"
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp)
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Surface(
             shape = RoundedCornerShape(4.dp),
@@ -331,16 +544,17 @@ private fun GearSlotMiniLine(prefix: String, item: InventoryItem?) {
             Text(
                 text = prefix,
                 style = MaterialTheme.typography.labelSmall,
-                fontSize = 9.sp,
+                fontSize = 8.sp,
                 fontFamily = JetBrainsMonoFontFamily,
                 fontWeight = FontWeight.Bold,
                 color = accent,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
             )
         }
         Text(
             text = name,
             style = MaterialTheme.typography.labelSmall,
+            fontSize = 10.sp,
             color = if (item != null) Color(0xFFFFF8E7) else Color(0xFF9CA3AF),
             maxLines = 1
         )
@@ -417,14 +631,17 @@ fun AnimatedBattleStage(
                 launch { enemyHitFlash.animateTo(0f, tween(200)) }
                 launch { slashProgress.animateTo(0f, tween(140)) }
             }
-            BattleAnimAction.HERO_SOLAR_SKILL -> {
-                launch { heroLunge.animateTo(0.75f, tween(160)) }
+            BattleAnimAction.HERO_SOLAR_SKILL,
+            BattleAnimAction.HERO_ULTIMATE_COMBO -> {
+                launch { heroLunge.animateTo(0.88f, tween(160)) }
                 launch { solarBeamAlpha.animateTo(1f, tween(150)) }
+                launch { slashProgress.animateTo(1f, tween(240)) }
                 delay(130)
                 launch { enemyHitFlash.animateTo(1f, tween(100)) }
-                launch { enemyRecoil.animateTo(1.25f, tween(170)) }
-                delay(220)
+                launch { enemyRecoil.animateTo(1.35f, tween(170)) }
+                delay(230)
                 launch { solarBeamAlpha.animateTo(0f, tween(200)) }
+                launch { slashProgress.animateTo(0f, tween(160)) }
                 launch { heroLunge.animateTo(0f, tween(180)) }
                 launch { enemyRecoil.animateTo(0f, tween(180)) }
                 launch { enemyHitFlash.animateTo(0f, tween(200)) }
@@ -483,11 +700,13 @@ fun AnimatedBattleStage(
     }
 
     val realmColors = when {
+        battle.mode == BattleMode.WEEKLY_BOSS_RAID -> listOf(Color(0xFF280911), Color(0xFF4C1022), Color(0xFF230A10))
+        battle.mode == BattleMode.DAILY_ELEMENTAL_RIFT -> listOf(Color(0xFF0E1D2A), Color(0xFF1F3C5A), Color(0xFF152536))
         battle.mode == BattleMode.ENDLESS_SPIRE -> listOf(Color(0xFF140D28), Color(0xFF2B144A), Color(0xFF1D1128))
-        battle.realmNumber == 2 -> listOf(Color(0xFF1C1018), Color(0xFF3E1922), Color(0xFF281214))
-        battle.realmNumber == 3 -> listOf(Color(0xFF0E1B2B), Color(0xFF1A344D), Color(0xFF142230))
-        battle.realmNumber == 4 -> listOf(Color(0xFF24130D), Color(0xFF472013), Color(0xFF2E150E))
-        battle.realmNumber >= 5 -> listOf(Color(0xFF1A142D), Color(0xFF3A2454), Color(0xFF2C1E10))
+        battle.realmNumber in listOf(2, 6) -> listOf(Color(0xFF1C1018), Color(0xFF3E1922), Color(0xFF281214))
+        battle.realmNumber in listOf(3, 8) -> listOf(Color(0xFF0E1B2B), Color(0xFF1A344D), Color(0xFF142230))
+        battle.realmNumber in listOf(4, 7) -> listOf(Color(0xFF24130D), Color(0xFF472013), Color(0xFF2E150E))
+        battle.realmNumber >= 9 -> listOf(Color(0xFF1A142D), Color(0xFF3A2454), Color(0xFF2C1E10))
         else -> listOf(Color(0xFF171A26), Color(0xFF2C2334), Color(0xFF3B2416))
     }
 
@@ -635,7 +854,7 @@ fun AnimatedBattleStage(
                 }
             }
 
-            // Top HUD Pills (Turn / Mode / Boss Badge)
+            // Top HUD Pills (Turn / Wave / Mode / Boss Phase Badge)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -648,10 +867,12 @@ fun AnimatedBattleStage(
                     color = Color(0xDD111318),
                     border = BorderStroke(1.dp, Color(0xFFFFB800))
                 ) {
-                    val stageTag = if (battle.mode == BattleMode.ENDLESS_SPIRE) {
-                        "SPIRE F${battle.spireFloor} • TURN ${battle.turnNumber}"
-                    } else {
-                        "R${battle.realmNumber}-${battle.stageNumber} • TURN ${battle.turnNumber}"
+                    val waveTag = if (battle.totalWaves > 1) " • W${battle.currentWave}/${battle.totalWaves}" else ""
+                    val stageTag = when (battle.mode) {
+                        BattleMode.ENDLESS_SPIRE -> "SPIRE F${battle.spireFloor}$waveTag • T${battle.turnNumber}"
+                        BattleMode.DAILY_ELEMENTAL_RIFT -> "DAILY RIFT$waveTag • T${battle.turnNumber}"
+                        BattleMode.WEEKLY_BOSS_RAID -> "TITAN RAID • T${battle.turnNumber}"
+                        BattleMode.REALM_CAMPAIGN -> "R${battle.realmNumber}-${battle.stageNumber}$waveTag • T${battle.turnNumber}"
                     }
                     Text(
                         text = stageTag,
@@ -665,15 +886,33 @@ fun AnimatedBattleStage(
                 if (enemy.isBoss) {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = Color(0xDDB91C1C),
+                        color = if (enemy.phase >= 2) Color(0xDD991B1B) else Color(0xDDB91C1C),
                         border = BorderStroke(1.dp, Color(0xFFFFD166))
                     ) {
+                        val bossBadge = buildString {
+                            append(if (enemy.phase >= 2) "PHASE II ENRAGED" else "BOSS ${enemy.affinity.symbol}")
+                            if (enemy.doomTurnsRemaining > 0) append(" • DOOM ${enemy.doomTurnsRemaining}T")
+                        }
                         Text(
-                            text = "BOSS • +10 SOL COINS",
+                            text = bossBadge,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
                             modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                        )
+                    }
+                } else {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xDD1F2937),
+                        border = BorderStroke(1.dp, Color(0xFF93C5FD))
+                    ) {
+                        Text(
+                            text = "${enemy.affinity.symbol} ${enemy.affinity.label.uppercase()}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFE0F2FE),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
                 }
