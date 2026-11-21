@@ -170,6 +170,20 @@ fun SolstrideAppShell(
         }
     }
 
+    val bluetoothPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        viewModel.onBluetoothConnectPermissionResult(granted)
+    }
+
+    fun requestBluetoothWatchDetectionPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            bluetoothPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            viewModel.onBluetoothConnectPermissionResult(true)
+        }
+    }
+
     val healthConnectPermissionLauncher = rememberLauncherForActivityResult(
         contract = PermissionController.createRequestPermissionResultContract()
     ) { grantedPermissions ->
@@ -573,6 +587,7 @@ fun SolstrideAppShell(
                                     onResetPedometerSession = { viewModel.resetPedometerSession() },
                                     onCycleDailyStepGoal = { viewModel.cycleDailyStepGoal() },
                                     onRequestHealthConnectPermission = { requestHealthConnectAccess() },
+                                    onRequestBluetoothWatchPermission = { requestBluetoothWatchDetectionPermission() },
                                     onInstallOrOpenHealthConnect = { openHealthConnectInstallerOrSettings() },
                                     onOpenSamsungHealth = { openSamsungHealthApp() },
                                     onEngageBattle = { boss -> viewModel.engageEncounter(boss) },
@@ -681,6 +696,7 @@ fun SolstrideAppShell(
             onSyncNow = { viewModel.manualSyncWatchAndCloud() },
             onRequestHealthConnectPermission = { requestHealthConnectAccess() },
             onRequestHealthConnectBackgroundPermission = { requestHealthConnectBackgroundAccess() },
+            onRequestBluetoothWatchPermission = { requestBluetoothWatchDetectionPermission() },
             onInstallOrOpenHealthConnect = { openHealthConnectInstallerOrSettings() },
             onOpenSamsungHealth = { openSamsungHealthApp() },
             onToggleHealthConnectAllSources = { viewModel.toggleHealthConnectAllSources() },

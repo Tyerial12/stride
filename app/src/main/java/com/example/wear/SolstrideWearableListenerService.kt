@@ -234,6 +234,18 @@ class SolstrideWearableListenerService :
     }
 
     @Suppress("DEPRECATION")
+    override fun onPeerConnected(peer: Node) {
+        super.onPeerConnected(peer)
+        if (peer.isNearby) {
+            handleWatchNodeReachable(
+                nodeId = peer.id,
+                displayName = peer.displayName.ifBlank { "Samsung Galaxy Watch" },
+                ackMs = System.currentTimeMillis()
+            )
+        }
+    }
+
+    @Suppress("DEPRECATION")
     override fun onPeerDisconnected(peer: Node) {
         super.onPeerDisconnected(peer)
         handleWatchNodeUnreachable(nodeId = peer.id, displayName = peer.displayName)
@@ -311,21 +323,17 @@ class SolstrideWearableListenerService :
                 watchName = displayName,
                 heartbeatAckMs = ackMs
             )
-            Log.d(TAG, "Watch verified reachable via capability/heartbeat ($displayName): pausing phone pedometer")
+            Log.d(TAG, "Watch verified reachable ($displayName): pausing phone pedometer")
         }
     }
 
     private fun handleWatchNodeUnreachable(nodeId: String?, displayName: String?) {
         serviceScope.launch {
-            val nearbyCapableNodes = runCatching {
-                capabilityClient.getCapability(
-                    WearDataPaths.CAPABILITY_SOLSTRIDE_WATCH_STEP_TRACKER,
-                    CapabilityClient.FILTER_REACHABLE
-                ).await().nodes.filter { it.isNearby }
-            }.getOrDefault(emptyList())
-
-            val hasLiveHeartbeat = WatchHeartbeatRegistry.isHeartbeatFresh(System.currentTimeMillis())
-            if (nearbyCapableNodes.isEmpty() || !hasLiveHeartbeat) {
+            val liveDetected = WatchConnectionDetector.detectConnectedWatch(
+                context = applicationContext,
+                suppressWearNodeCache = true
+            )
+            if (!liveDetected.connected) {
                 WatchHeartbeatRegistry.clear()
                 val preferences = SolstridePreferences(applicationContext)
                 preferences.setLastWatchStepReceivedMs(0L)

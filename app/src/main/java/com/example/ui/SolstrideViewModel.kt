@@ -556,6 +556,23 @@ class SolstrideViewModel(
         }
     }
 
+    fun onBluetoothConnectPermissionResult(granted: Boolean) {
+        viewModelScope.launch {
+            watchBridge.onBluetoothPermissionUpdated()
+            val status = watchBridge.refreshWatchConnection()
+            reconcilePedometerWithWatchState()
+            haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
+            _bannerMessage.value = when {
+                granted && status.connected ->
+                    "${status.watchDisplayName} detected (${status.connectionTransport}) — Phone Pedometer on standby."
+                granted ->
+                    "Nearby Bluetooth Watch detection enabled! Will auto-switch immediately when your watch connects or disconnects."
+                else ->
+                    "Bluetooth permission declined — using Wear OS & Audio watch detection fallback."
+            }
+        }
+    }
+
     fun onHardwareBaselineUpdated(baseline: Long) {
         if (baseline < 0L || isWatchConnected.value) return
         viewModelScope.launch {
@@ -1968,6 +1985,7 @@ class SolstrideViewModel(
     override fun onCleared() {
         super.onCleared()
         BackgroundSyncGuard.setForeground(false)
+        watchBridge.release()
         stepTracker.unregisterWatchDisconnectReceiver()
         stepTracker.stopTracking()
     }

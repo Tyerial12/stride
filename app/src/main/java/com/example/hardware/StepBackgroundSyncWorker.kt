@@ -319,15 +319,9 @@ class StepBackgroundSyncWorker(
     private suspend fun isWearWatchConnectedNow(): Boolean {
         return withTimeoutOrNull(2_000L) {
             runCatching {
-                val capabilityInfo = Wearable.getCapabilityClient(applicationContext)
-                    .getCapability(
-                        com.example.wear.WearDataPaths.CAPABILITY_SOLSTRIDE_WATCH_STEP_TRACKER,
-                        com.google.android.gms.wearable.CapabilityClient.FILTER_REACHABLE
-                    )
-                    .await()
-                val nearbyNode = capabilityInfo.nodes.firstOrNull { it.isNearby } ?: return@runCatching false
-                com.example.wear.WatchHeartbeatRegistry.isHeartbeatFresh(System.currentTimeMillis()) &&
-                    nearbyNode.id.isNotBlank()
+                com.example.wear.WatchConnectionDetector
+                    .detectConnectedWatch(applicationContext)
+                    .connected
             }.getOrDefault(false)
         } ?: false
     }

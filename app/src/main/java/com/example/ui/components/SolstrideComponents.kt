@@ -425,6 +425,7 @@ fun WatchSyncBottomSheet(
     onSyncNow: () -> Unit,
     onRequestHealthConnectPermission: () -> Unit,
     onRequestHealthConnectBackgroundPermission: () -> Unit,
+    onRequestBluetoothWatchPermission: () -> Unit,
     onInstallOrOpenHealthConnect: () -> Unit,
     onOpenSamsungHealth: () -> Unit,
     onToggleHealthConnectAllSources: () -> Unit,
@@ -464,19 +465,80 @@ fun WatchSyncBottomSheet(
                         style = MaterialTheme.typography.headlineMedium
                     )
                     Text(
-                        text = when (healthConnectStatus.state) {
-                            HealthConnectState.CONNECTED ->
-                                "${healthConnectStatus.primaryWatchSource} • Auto-syncing every 5s"
-                            HealthConnectState.PERMISSION_REQUIRED ->
-                                "Grant Health Connect access to import watch steps"
-                            HealthConnectState.UPDATE_REQUIRED ->
-                                "Install or update Health Connect for watch sync"
-                            HealthConnectState.UNAVAILABLE ->
-                                watchStatus.watchDisplayName
+                        text = if (watchStatus.connected) {
+                            "${watchStatus.watchDisplayName} • ${watchStatus.connectionTransport}"
+                        } else {
+                            watchStatus.watchDisplayName
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+
+            // Live Bluetooth & Wear OS Watch Link Status Card
+            SolstrideCard(
+                containerColor = if (watchStatus.connected) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                },
+                strongBorder = true
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Live Watch Connection",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Text(
+                        text = when {
+                            watchStatus.connected -> "CONNECTED"
+                            !watchStatus.bluetoothEnabled -> "BT OFF"
+                            !watchStatus.bluetoothPermissionGranted -> "BT PERMISSION"
+                            else -> "DISCONNECTED"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = if (watchStatus.connected) {
+                            MaterialTheme.colorScheme.tertiary
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        }
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = when {
+                        watchStatus.connected ->
+                            "${watchStatus.watchDisplayName} detected via ${watchStatus.connectionTransport}. Phone pedometer is paused automatically so only watch steps count."
+                        !watchStatus.bluetoothEnabled ->
+                            "Bluetooth is currently OFF on your phone. Phone pedometer is active until Bluetooth is turned on and your watch connects."
+                        !watchStatus.bluetoothPermissionGranted ->
+                            "Allow Nearby Devices (Bluetooth) access so Solstride can detect Galaxy Watch, Pixel Watch, Garmin, or Fitbit connect/disconnect events immediately."
+                        else ->
+                            "No Bluetooth or Wear OS watch is currently connected. Built-in Phone Pedometer is actively counting your steps."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (!watchStatus.bluetoothPermissionGranted) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = onRequestBluetoothWatchPermission,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("sheet_grant_bluetooth_watch_button")
+                    ) {
+                        Icon(Icons.Filled.Watch, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Allow Bluetooth Watch Detection")
+                    }
                 }
             }
 

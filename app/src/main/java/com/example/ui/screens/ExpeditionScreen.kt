@@ -92,6 +92,7 @@ fun ExpeditionScreen(
     onResetPedometerSession: () -> Unit,
     onCycleDailyStepGoal: () -> Unit,
     onRequestHealthConnectPermission: () -> Unit,
+    onRequestBluetoothWatchPermission: () -> Unit,
     onInstallOrOpenHealthConnect: () -> Unit,
     onOpenSamsungHealth: () -> Unit,
     onEngageBattle: (Boolean) -> Unit,
@@ -431,7 +432,11 @@ fun ExpeditionScreen(
                 Text(
                     text = when {
                         isWatchConnected ->
-                            "Watch Connected (${watchStatus.watchDisplayName}) • Phone pedometer is OFF so only watch steps count • Auto-syncing every 5s • Lifetime ${String.format(Locale.US, "%,d", profile.totalSteps)} steps."
+                            "Watch Connected (${watchStatus.watchDisplayName} • ${watchStatus.connectionTransport}) • Phone pedometer is OFF so only watch steps count • Auto-syncing every 5s • Lifetime ${String.format(Locale.US, "%,d", profile.totalSteps)} steps."
+                        !watchStatus.bluetoothEnabled ->
+                            "Bluetooth is OFF — Built-In Phone Pedometer is counting your steps automatically. Turn Bluetooth ON to auto-detect your watch."
+                        !watchStatus.bluetoothPermissionGranted ->
+                            "Grant Nearby Devices (Bluetooth) permission below so Solstride detects your Galaxy Watch / smartwatch connecting or disconnecting immediately."
                         healthConnectStatus.state == HealthConnectState.CONNECTED ->
                             "No watch connected right now — Built-In Phone Pedometer is counting your steps. Health Connect & Samsung Health are ready and will auto-switch as soon as your watch connects."
                         healthConnectStatus.state == HealthConnectState.PERMISSION_REQUIRED ->
@@ -444,6 +449,25 @@ fun ExpeditionScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                if (!watchStatus.bluetoothPermissionGranted) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = onRequestBluetoothWatchPermission,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("enable_bluetooth_watch_detection_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    ) {
+                        Icon(Icons.Filled.Watch, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Enable Bluetooth Watch Detection")
+                    }
+                }
 
                 if (healthConnectStatus.state == HealthConnectState.PERMISSION_REQUIRED) {
                     Spacer(modifier = Modifier.height(10.dp))

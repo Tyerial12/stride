@@ -1,7 +1,23 @@
 package com.example.wear
 
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothHeadset
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.example.data.model.HeroProfile
 import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.CapabilityInfo
@@ -17,12 +33,15 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -45,17 +64,8 @@ object WearDataPaths {
 }
 
 /**
- * Shared in-process heartbeat registry updated by both SolstrideWearableListenerService and
- * GalaxyWatchBridge whenever the watch responds with a heartbeat ACK or live step payload.
- *
- * A watch is ONLY considered reachable when:
- *  1. CapabilityClient reports a nearby reachable node advertising `solstride_watch_step_tracker`
- *     (or an active ACK was received from the watch), AND
- *  2. The latest heartbeat ACK is fresher than HEARTBEAT_TIMEOUT_MS (12 seconds) with fewer than
- *     MAX_MISSED_HEARTBEATS consecutive missed pings.
- *
- * This prevents stale Wear OS / Galaxy Wearable Bluetooth phantom nodes from falsely reporting
- * "Watch Connected" when the watch is actually disconnected, out of range, or unreachable.
+ * Shared in-process heartbeat registry used when a Wear OS companion watch app actively responds
+ * to `/solstride/heartbeat_ping` with `/solstride/heartbeat_ack`.
  */
 object WatchHeartbeatRegistry {
     const val HEARTBEAT_TIMEOUT_MS = 12_000L
@@ -111,6 +121,9 @@ data class WatchLinkStatus(
     val connected: Boolean = false,
     val watchDisplayName: String = "No Watch Connected",
     val connectedNodeId: String? = null,
+    val connectionTransport: String = "None",
+    val bluetoothPermissionGranted: Boolean = true,
+    val bluetoothEnabled: Boolean = true,
     val lastCheckedMs: Long = 0L,
     val lastAutoSyncMs: Long = 0L,
     val lastHeartbeatAckMs: Long = 0L,
@@ -124,11 +137,172 @@ class GalaxyWatchBridge(context: Context) {
     private val capabilityClient = Wearable.getCapabilityClient(appContext)
     private val dataClient = Wearable.getDataClient(appContext)
     private val messageClient = Wearable.getMessageClient(appContext)
+    private val bluetoothManager = appContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+    private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
-    private val _linkStatus = MutableStateFlow(WatchLinkStatus())
+    private val _linkStatus = MutableStateFlow(
+        WatchLinkStatus(
+            bluetoothPermissionGranted = WatchConnectionDetector.hasBluetoothConnectPermission(appContext),
+            bluetoothEnabled = WatchConnectionDetector.isBluetoothEnabled(appContext)
+        )
+    )
     val linkStatus: StateFlow<WatchLinkStatus> = _linkStatus.asStateFlow()
 
+    @Volatile
     private var wasWatchConnected = false
+
+    @Volatile
+    private var headsetProxy: BluetoothHeadset? = null
+
+    @Volatile
+    private var lastExplicitDisconnectMs: Long = 0L
+
+    private var btReceiverRegistered = false
+    private var audioCallbackRegistered = false
+
+    // Live ACL-connected smartwatches (MAC address -> display name)
+    private val activeAclWatches = ConcurrentHashMap<String, String>()
+    // Briefly tracks addresses that just received ACTION_ACL_DISCONNECTED to avoid teardown flicker
+    private val recentlyDisconnectedAddresses = ConcurrentHashMap<String, Long>()
+
+    private val headsetServiceListener = object : BluetoothProfile.ServiceListener {
+        override fun onServiceConnected(profile: Int, proxy: BluetoothProfile?) {
+            if (profile == BluetoothProfile.HEADSET && proxy is BluetoothHeadset) {
+                headsetProxy = proxy
+                bridgeScope.launch { refreshWatchConnection() }
+            }
+        }
+
+        override fun onServiceDisconnected(profile: Int) {
+            if (profile == BluetoothProfile.HEADSET) {
+                headsetProxy = null
+            }
+        }
+    }
+
+    private val bluetoothReceiver = object : BroadcastReceiver() {
+        @SuppressLint("MissingPermission")
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val action = intent?.action ?: return
+            val hasPerm = WatchConnectionDetector.hasBluetoothConnectPermission(appContext)
+            when (action) {
+                BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                    val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                    if (state == BluetoothAdapter.STATE_OFF || state == BluetoothAdapter.STATE_TURNING_OFF) {
+                        activeAclWatches.clear()
+                        recentlyDisconnectedAddresses.clear()
+                        WatchHeartbeatRegistry.clear()
+                        lastExplicitDisconnectMs = System.currentTimeMillis()
+                        bridgeScope.launch { refreshWatchConnection() }
+                    } else if (state == BluetoothAdapter.STATE_ON) {
+                        lastExplicitDisconnectMs = 0L
+                        recentlyDisconnectedAddresses.clear()
+                        attachHeadsetProfileProxyIfPermitted()
+                        bridgeScope.launch {
+                            refreshWatchConnection()
+                            delay(1_500L)
+                            refreshWatchConnection()
+                        }
+                    }
+                }
+
+                BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                    val device = extractBluetoothDevice(intent) ?: return
+                    recentlyDisconnectedAddresses.remove(device.address)
+                    if (hasPerm && WatchDeviceClassifier.isSmartWatchDevice(device, true)) {
+                        val name = WatchDeviceClassifier.safeDeviceName(device, true)
+                        activeAclWatches[device.address] = name
+                        lastExplicitDisconnectMs = 0L
+                        Log.d(TAG, "Bluetooth ACL watch CONNECTED: $name (${device.address})")
+                        bridgeScope.launch {
+                            refreshWatchConnection()
+                            delay(1_500L)
+                            refreshWatchConnection()
+                        }
+                    }
+                }
+
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    val device = extractBluetoothDevice(intent)
+                    val address = device?.address
+                    val now = System.currentTimeMillis()
+                    val wasTrackedWatch = address != null && activeAclWatches.remove(address) != null
+                    val looksLikeWatch = device != null && hasPerm &&
+                        WatchDeviceClassifier.isSmartWatchDevice(device, true)
+                    val matchesCurrentId = address != null && address == _linkStatus.value.connectedNodeId
+
+                    if (wasTrackedWatch || looksLikeWatch || matchesCurrentId || _linkStatus.value.connected) {
+                        if (wasTrackedWatch || looksLikeWatch || matchesCurrentId) {
+                            if (address != null) {
+                                recentlyDisconnectedAddresses[address] = now
+                            }
+                            WatchHeartbeatRegistry.clear()
+                            lastExplicitDisconnectMs = now
+                            Log.d(TAG, "Bluetooth ACL watch DISCONNECTED: $address")
+                        }
+                        bridgeScope.launch {
+                            refreshWatchConnection()
+                            delay(1_500L)
+                            refreshWatchConnection()
+                        }
+                    }
+                }
+
+                BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
+                    val state = intent.getIntExtra(
+                        BluetoothProfile.EXTRA_STATE,
+                        BluetoothProfile.STATE_DISCONNECTED
+                    )
+                    val device = extractBluetoothDevice(intent)
+                    if (device != null && hasPerm && WatchDeviceClassifier.isSmartWatchDevice(device, true)) {
+                        if (state == BluetoothProfile.STATE_CONNECTED) {
+                            recentlyDisconnectedAddresses.remove(device.address)
+                            activeAclWatches[device.address] = WatchDeviceClassifier.safeDeviceName(device, true)
+                            lastExplicitDisconnectMs = 0L
+                        } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
+                            val now = System.currentTimeMillis()
+                            activeAclWatches.remove(device.address)
+                            recentlyDisconnectedAddresses[device.address] = now
+                            WatchHeartbeatRegistry.clear()
+                            lastExplicitDisconnectMs = now
+                        }
+                    }
+                    bridgeScope.launch { refreshWatchConnection() }
+                }
+            }
+        }
+    }
+
+    private val audioDeviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+            val watchAdded = addedDevices.orEmpty().any { info ->
+                (info.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                        info.type == AudioDeviceInfo.TYPE_BLE_HEADSET)) &&
+                    WatchDeviceClassifier.isSmartWatchName(info.productName?.toString())
+            }
+            if (watchAdded) {
+                lastExplicitDisconnectMs = 0L
+                Log.d(TAG, "AudioManager watch SCO/BLE device ADDED")
+                bridgeScope.launch { refreshWatchConnection() }
+            }
+        }
+
+        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+            val watchRemoved = removedDevices.orEmpty().any { info ->
+                (info.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                        info.type == AudioDeviceInfo.TYPE_BLE_HEADSET)) &&
+                    WatchDeviceClassifier.isSmartWatchName(info.productName?.toString())
+            }
+            if (watchRemoved) {
+                WatchHeartbeatRegistry.clear()
+                lastExplicitDisconnectMs = System.currentTimeMillis()
+                Log.d(TAG, "AudioManager watch SCO/BLE device REMOVED")
+                bridgeScope.launch { refreshWatchConnection() }
+            }
+        }
+    }
 
     private val dataChangedListener = DataClient.OnDataChangedListener { dataEvents: DataEventBuffer ->
         val now = System.currentTimeMillis()
@@ -152,6 +326,7 @@ class GalaxyWatchBridge(context: Context) {
                         val name = map.getString(WearDataPaths.KEY_WATCH_NAME)
                         val ackAt = map.getLong(WearDataPaths.KEY_TIMESTAMP, now)
                         WatchHeartbeatRegistry.recordHeartbeatAck(hostNodeId, name, ackAt)
+                        lastExplicitDisconnectMs = 0L
                         ackReceived = true
                     }
                     WearDataPaths.WATCH_NODE_STATUS -> {
@@ -162,6 +337,7 @@ class GalaxyWatchBridge(context: Context) {
                             disconnectDetected = true
                         } else {
                             WatchHeartbeatRegistry.recordHeartbeatAck(hostNodeId, name, now)
+                            lastExplicitDisconnectMs = 0L
                             ackReceived = true
                         }
                     }
@@ -170,6 +346,7 @@ class GalaxyWatchBridge(context: Context) {
         }
         if (disconnectDetected) {
             WatchHeartbeatRegistry.clear()
+            lastExplicitDisconnectMs = now
             bridgeScope.launch { refreshWatchConnection() }
         } else if (ackReceived) {
             bridgeScope.launch { refreshWatchConnection() }
@@ -181,10 +358,10 @@ class GalaxyWatchBridge(context: Context) {
             val hasNearbyNode = capabilityInfo.nodes.any { it.isNearby }
             if (!hasNearbyNode) {
                 WatchHeartbeatRegistry.clear()
+            } else {
+                lastExplicitDisconnectMs = 0L
             }
-            bridgeScope.launch {
-                refreshWatchConnection()
-            }
+            bridgeScope.launch { refreshWatchConnection() }
         }
 
     private val messageReceivedListener =
@@ -202,16 +379,20 @@ class GalaxyWatchBridge(context: Context) {
                         watchName = watchName,
                         ackMs = now
                     )
+                    lastExplicitDisconnectMs = 0L
                     bridgeScope.launch { refreshWatchConnection() }
                 }
                 WearDataPaths.WATCH_DISCONNECTED -> {
                     WatchHeartbeatRegistry.clear()
+                    lastExplicitDisconnectMs = now
                     bridgeScope.launch { refreshWatchConnection() }
                 }
             }
         }
 
     init {
+        registerBluetoothMonitors()
+        attachHeadsetProfileProxyIfPermitted()
         runCatching { dataClient.addListener(dataChangedListener) }
         runCatching {
             capabilityClient.addListener(
@@ -222,6 +403,63 @@ class GalaxyWatchBridge(context: Context) {
         runCatching { messageClient.addListener(messageReceivedListener) }
     }
 
+    private fun registerBluetoothMonitors() {
+        if (!btReceiverRegistered) {
+            val filter = IntentFilter().apply {
+                addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+                addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+                addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+                addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
+            }
+            runCatching {
+                ContextCompat.registerReceiver(
+                    appContext,
+                    bluetoothReceiver,
+                    filter,
+                    ContextCompat.RECEIVER_EXPORTED
+                )
+                btReceiverRegistered = true
+            }.onFailure { err ->
+                Log.w(TAG, "Unable to register Bluetooth monitor receiver: ${err.message}")
+            }
+        }
+
+        val am = audioManager
+        if (!audioCallbackRegistered && am != null) {
+            runCatching {
+                am.registerAudioDeviceCallback(
+                    audioDeviceCallback,
+                    Handler(Looper.getMainLooper())
+                )
+                audioCallbackRegistered = true
+            }.onFailure { err ->
+                Log.w(TAG, "Unable to register AudioDeviceCallback: ${err.message}")
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun attachHeadsetProfileProxyIfPermitted() {
+        if (headsetProxy != null) return
+        if (!WatchConnectionDetector.hasBluetoothConnectPermission(appContext)) return
+        val adapter = bluetoothManager?.adapter ?: return
+        if (!runCatching { adapter.isEnabled }.getOrDefault(false)) return
+        runCatching {
+            adapter.getProfileProxy(appContext, headsetServiceListener, BluetoothProfile.HEADSET)
+        }.onFailure { err ->
+            Log.d(TAG, "Headset profile proxy attach skipped: ${err.message}")
+        }
+    }
+
+    fun onBluetoothPermissionUpdated() {
+        attachHeadsetProfileProxyIfPermitted()
+        lastExplicitDisconnectMs = 0L
+        bridgeScope.launch { refreshWatchConnection() }
+    }
+
+    fun hasBluetoothPermission(): Boolean =
+        WatchConnectionDetector.hasBluetoothConnectPermission(appContext)
+
     fun markWatchConnectionFromBroadcast(
         connected: Boolean,
         nodeId: String?,
@@ -229,16 +467,21 @@ class GalaxyWatchBridge(context: Context) {
         heartbeatAckMs: Long = 0L
     ) {
         val now = System.currentTimeMillis()
+        val hasPerm = WatchConnectionDetector.hasBluetoothConnectPermission(appContext)
+        val btOn = WatchConnectionDetector.isBluetoothEnabled(appContext)
         if (connected) {
-            val effectiveAck = if (heartbeatAckMs > 0L) heartbeatAckMs else now
-            WatchHeartbeatRegistry.recordHeartbeatAck(nodeId, displayName, effectiveAck)
+            if (heartbeatAckMs > 0L) {
+                WatchHeartbeatRegistry.recordHeartbeatAck(nodeId, displayName, heartbeatAckMs)
+            }
             wasWatchConnected = true
             _linkStatus.value = _linkStatus.value.copy(
                 connected = true,
                 watchDisplayName = displayName?.ifBlank { "Samsung Galaxy Watch" } ?: "Samsung Galaxy Watch",
                 connectedNodeId = nodeId ?: _linkStatus.value.connectedNodeId,
+                bluetoothPermissionGranted = hasPerm,
+                bluetoothEnabled = btOn,
                 lastCheckedMs = now,
-                lastHeartbeatAckMs = effectiveAck,
+                lastHeartbeatAckMs = if (heartbeatAckMs > 0L) heartbeatAckMs else _linkStatus.value.lastHeartbeatAckMs,
                 lastError = null
             )
         } else {
@@ -246,8 +489,15 @@ class GalaxyWatchBridge(context: Context) {
             wasWatchConnected = false
             _linkStatus.value = _linkStatus.value.copy(
                 connected = false,
-                watchDisplayName = "Watch Disconnected — Phone Pedometer Active",
+                watchDisplayName = if (!btOn) {
+                    "Bluetooth Off — Phone Pedometer Active"
+                } else {
+                    "No Watch Connected (Phone Pedometer Active)"
+                },
                 connectedNodeId = null,
+                connectionTransport = if (!btOn) "Bluetooth Off" else "None",
+                bluetoothPermissionGranted = hasPerm,
+                bluetoothEnabled = btOn,
                 lastCheckedMs = now,
                 lastHeartbeatAckMs = 0L,
                 lastError = null
@@ -256,62 +506,101 @@ class GalaxyWatchBridge(context: Context) {
     }
 
     /**
-     * Queries CapabilityClient (`FILTER_REACHABLE`) for a nearby watch advertising
-     * `solstride_watch_step_tracker`, sends a live `/solstride/heartbeat_ping` probe with a short
-     * timeout, and verifies a fresh heartbeat ACK in WatchHeartbeatRegistry before declaring the
-     * watch connected. If the capability is absent or the heartbeat expires, the watch is marked
-     * unreachable and a broadcast intent is fired to enable the phone's local step counter sensor.
+     * Performs a live multi-layer watch connection check:
+     *  1. Checks live Bluetooth profiles (GATT, GATT_SERVER, HFP Headset), active ACL link,
+     *     zero-permission AudioManager SCO/BLE watch link, and Wear OS NodeClient (`isNearby == true`).
+     *  2. If a Solstride Wear OS companion app is also installed (`CapabilityClient` nearby node),
+     *     probes `/solstride/heartbeat_ping` to keep live DataClient step sync fresh.
+     *  3. On any connect or disconnect transition, immediately fires
+     *     `WatchConnectionBroadcast.ACTION_TOGGLE_LOCAL_STEP_SENSOR` so the phone's local step
+     *     counter switches ON or OFF without delay.
      */
     suspend fun refreshWatchConnection(): WatchLinkStatus {
         val now = System.currentTimeMillis()
+        attachHeadsetProfileProxyIfPermitted()
         return try {
-            val capabilityInfo = withTimeoutOrNull(CAPABILITY_QUERY_TIMEOUT_MS) {
-                capabilityClient.getCapability(
-                    WearDataPaths.CAPABILITY_SOLSTRIDE_WATCH_STEP_TRACKER,
-                    CapabilityClient.FILTER_REACHABLE
-                ).await()
+            val suppressWearCache = lastExplicitDisconnectMs > 0L &&
+                (now - lastExplicitDisconnectMs) < ACL_DISCONNECT_SUPPRESSION_MS
+
+            // Prune expired disconnect-teardown guard entries (> 5s)
+            recentlyDisconnectedAddresses.entries.removeIf { (_, ts) ->
+                (now - ts) > PROFILE_TEARDOWN_GUARD_MS
             }
+            val ignoredAddresses = recentlyDisconnectedAddresses.keys.toSet()
 
-            // Require an actively nearby capable node (ignores stale cloud-routed phantom nodes)
-            val reachableNode = capabilityInfo?.nodes?.firstOrNull { it.isNearby }
+            // 1. Primary real-world detection: live Bluetooth GATT/HFP/ACL + AudioManager + Wear OS Nearby Node
+            val detected = WatchConnectionDetector.detectConnectedWatch(
+                context = appContext,
+                headsetProxy = headsetProxy,
+                activeAclWatches = activeAclWatches,
+                ignoredAddresses = ignoredAddresses,
+                suppressWearNodeCache = suppressWearCache
+            )
 
-            if (reachableNode != null) {
-                // Active heartbeat ping probe to verify the watch is genuinely reachable right now
-                val pingDelivered = withTimeoutOrNull(HEARTBEAT_PING_TIMEOUT_MS) {
+            // 2. Optional companion app check via CapabilityClient + Heartbeat ACK
+            var companionNodeId: String? = null
+            var companionWatchName: String? = null
+            var companionHeartbeatAlive = false
+            if (detected.bluetoothEnabled) {
+                val capabilityInfo = withTimeoutOrNull(CAPABILITY_QUERY_TIMEOUT_MS) {
                     runCatching {
-                        messageClient.sendMessage(
-                            reachableNode.id,
-                            WearDataPaths.HEARTBEAT_PING,
-                            now.toString().toByteArray(Charsets.UTF_8)
+                        capabilityClient.getCapability(
+                            WearDataPaths.CAPABILITY_SOLSTRIDE_WATCH_STEP_TRACKER,
+                            CapabilityClient.FILTER_REACHABLE
                         ).await()
-                        true
-                    }.getOrDefault(false)
-                } ?: false
-
-                if (!pingDelivered) {
-                    WatchHeartbeatRegistry.recordMissedPing()
+                    }.getOrNull()
                 }
-            } else {
-                WatchHeartbeatRegistry.recordMissedPing()
+                val capableNode = capabilityInfo?.nodes?.firstOrNull { it.isNearby }
+                if (capableNode != null) {
+                    val pingDelivered = withTimeoutOrNull(HEARTBEAT_PING_TIMEOUT_MS) {
+                        runCatching {
+                            messageClient.sendMessage(
+                                capableNode.id,
+                                WearDataPaths.HEARTBEAT_PING,
+                                now.toString().toByteArray(Charsets.UTF_8)
+                            ).await()
+                            true
+                        }.getOrDefault(false)
+                    } ?: false
+
+                    if (!pingDelivered) {
+                        WatchHeartbeatRegistry.recordMissedPing()
+                    }
+                    if (WatchHeartbeatRegistry.isHeartbeatFresh(now)) {
+                        companionHeartbeatAlive = true
+                        companionNodeId = capableNode.id
+                        companionWatchName = capableNode.displayName.ifBlank {
+                            WatchHeartbeatRegistry.latestWatchName() ?: "Samsung Galaxy Watch"
+                        }
+                    }
+                }
             }
 
-            val heartbeatFresh = WatchHeartbeatRegistry.isHeartbeatFresh(now)
-            val isReachableAndAlive = reachableNode != null && heartbeatFresh
+            val isConnectedNow = detected.connected || companionHeartbeatAlive
+            val resolvedName = when {
+                detected.connected -> detected.displayName
+                companionHeartbeatAlive -> companionWatchName ?: "Samsung Galaxy Watch"
+                else -> detected.displayName
+            }
+            val resolvedId = companionNodeId ?: detected.identifier
+            val resolvedTransport = when {
+                companionHeartbeatAlive && detected.connected -> "${detected.transport} + Companion"
+                companionHeartbeatAlive -> "Wear OS Companion"
+                else -> detected.transport
+            }
+
             val prevAutoSync = _linkStatus.value.lastAutoSyncMs
             val previousName = _linkStatus.value.watchDisplayName
             val previousNodeId = _linkStatus.value.connectedNodeId
 
-            val updated = if (isReachableAndAlive && reachableNode != null) {
-                val resolvedName = reachableNode.displayName.ifBlank {
-                    WatchHeartbeatRegistry.latestWatchName() ?: "Samsung Galaxy Watch"
-                }
+            val updated = if (isConnectedNow) {
                 val latestAck = WatchHeartbeatRegistry.latestAckMs()
                 if (!wasWatchConnected) {
                     wasWatchConnected = true
                     WatchConnectionBroadcast.sendToggleLocalStepSensorBroadcast(
                         context = appContext,
                         watchConnected = true,
-                        nodeId = reachableNode.id,
+                        nodeId = resolvedId,
                         watchName = resolvedName,
                         heartbeatAckMs = latestAck
                     )
@@ -319,7 +608,10 @@ class GalaxyWatchBridge(context: Context) {
                 WatchLinkStatus(
                     connected = true,
                     watchDisplayName = resolvedName,
-                    connectedNodeId = reachableNode.id,
+                    connectedNodeId = resolvedId,
+                    connectionTransport = resolvedTransport,
+                    bluetoothPermissionGranted = detected.bluetoothPermissionGranted,
+                    bluetoothEnabled = detected.bluetoothEnabled,
                     lastCheckedMs = now,
                     lastAutoSyncMs = prevAutoSync,
                     lastHeartbeatAckMs = latestAck,
@@ -338,8 +630,11 @@ class GalaxyWatchBridge(context: Context) {
                 }
                 WatchLinkStatus(
                     connected = false,
-                    watchDisplayName = "No Watch Connected (Phone Pedometer Active)",
+                    watchDisplayName = resolvedName,
                     connectedNodeId = null,
+                    connectionTransport = resolvedTransport,
+                    bluetoothPermissionGranted = detected.bluetoothPermissionGranted,
+                    bluetoothEnabled = detected.bluetoothEnabled,
                     lastCheckedMs = now,
                     lastAutoSyncMs = prevAutoSync,
                     lastHeartbeatAckMs = 0L,
@@ -351,7 +646,7 @@ class GalaxyWatchBridge(context: Context) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.w("GalaxyWatchBridge", "Capability/heartbeat check indicates watch unreachable: ${e.message}")
+            Log.w(TAG, "Watch reachability check failed: ${e.message}")
             if (wasWatchConnected) {
                 wasWatchConnected = false
                 WatchHeartbeatRegistry.clear()
@@ -364,6 +659,9 @@ class GalaxyWatchBridge(context: Context) {
                 connected = false,
                 watchDisplayName = "No Watch Connected (Phone Pedometer Active)",
                 connectedNodeId = null,
+                connectionTransport = "None",
+                bluetoothPermissionGranted = WatchConnectionDetector.hasBluetoothConnectPermission(appContext),
+                bluetoothEnabled = WatchConnectionDetector.isBluetoothEnabled(appContext),
                 lastCheckedMs = now,
                 lastAutoSyncMs = _linkStatus.value.lastAutoSyncMs,
                 lastHeartbeatAckMs = 0L,
@@ -375,64 +673,69 @@ class GalaxyWatchBridge(context: Context) {
     }
 
     /**
-     * Actively pulls any pending step batches from Wear OS DataClient ONLY when the watch is
-     * verified reachable via CapabilityClient + heartbeat ACK, and deletes consumed data items
-     * so cached historical DataClient items are never re-read when the watch is disconnected.
+     * Pulls pending Wear OS DataClient step batches when a Wear OS companion watch node is active.
      */
     suspend fun pullPendingWatchSteps(): List<WatchStepPayload> {
         val now = System.currentTimeMillis()
-        if (!_linkStatus.value.connected || !WatchHeartbeatRegistry.isHeartbeatFresh(now)) {
+        if (!_linkStatus.value.connected) {
             return emptyList()
         }
         val results = mutableListOf<WatchStepPayload>()
         try {
-            val connectedNodeId = _linkStatus.value.connectedNodeId ?: return emptyList()
-            runCatching {
-                withTimeoutOrNull(HEARTBEAT_PING_TIMEOUT_MS) {
-                    messageClient.sendMessage(
-                        connectedNodeId,
-                        WearDataPaths.REQUEST_STEPS_SYNC,
-                        byteArrayOf()
-                    ).await()
-                }
-            }
-
-            val buffer = dataClient.dataItems.await()
-            val consumedUris = mutableListOf<android.net.Uri>()
-            try {
-                for (item in buffer) {
-                    val path = item.uri.path ?: continue
-                    if (path == WearDataPaths.STEPS_BATCH) {
-                        val map = DataMapItem.fromDataItem(item).dataMap
-                        val steps = map.getLong(WearDataPaths.KEY_STEPS_DELTA, 0L)
-                        val recordedAt = map.getLong(WearDataPaths.KEY_TIMESTAMP, 0L)
-                        if (steps > 0L && (now - recordedAt) <= FRESH_STEP_ITEM_MAX_AGE_MS) {
-                            val batchId = map.getString(WearDataPaths.KEY_BATCH_ID)
-                                ?.takeIf { it.isNotBlank() }
-                                ?: "watch_data_${recordedAt}_$steps"
-                            results.add(
-                                WatchStepPayload(
-                                    batchId = batchId,
-                                    stepDelta = steps,
-                                    recordedAtMs = recordedAt
-                                )
-                            )
-                        }
-                        consumedUris.add(item.uri)
+            val connectedNodeId = _linkStatus.value.connectedNodeId
+            if (!connectedNodeId.isNullOrBlank() &&
+                !connectedNodeId.contains(":") &&
+                !connectedNodeId.startsWith("audio_")
+            ) {
+                runCatching {
+                    withTimeoutOrNull(HEARTBEAT_PING_TIMEOUT_MS) {
+                        messageClient.sendMessage(
+                            connectedNodeId,
+                            WearDataPaths.REQUEST_STEPS_SYNC,
+                            byteArrayOf()
+                        ).await()
                     }
                 }
-            } finally {
-                buffer.release()
             }
 
-            for (uri in consumedUris) {
-                runCatching { dataClient.deleteDataItems(uri).await() }
+            if (WatchHeartbeatRegistry.isHeartbeatFresh(now)) {
+                val buffer = dataClient.dataItems.await()
+                val consumedUris = mutableListOf<android.net.Uri>()
+                try {
+                    for (item in buffer) {
+                        val path = item.uri.path ?: continue
+                        if (path == WearDataPaths.STEPS_BATCH) {
+                            val map = DataMapItem.fromDataItem(item).dataMap
+                            val steps = map.getLong(WearDataPaths.KEY_STEPS_DELTA, 0L)
+                            val recordedAt = map.getLong(WearDataPaths.KEY_TIMESTAMP, 0L)
+                            if (steps > 0L && (now - recordedAt) <= FRESH_STEP_ITEM_MAX_AGE_MS) {
+                                val batchId = map.getString(WearDataPaths.KEY_BATCH_ID)
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?: "watch_data_${recordedAt}_$steps"
+                                results.add(
+                                    WatchStepPayload(
+                                        batchId = batchId,
+                                        stepDelta = steps,
+                                        recordedAtMs = recordedAt
+                                    )
+                                )
+                            }
+                            consumedUris.add(item.uri)
+                        }
+                    }
+                } finally {
+                    buffer.release()
+                }
+
+                for (uri in consumedUris) {
+                    runCatching { dataClient.deleteDataItems(uri).await() }
+                }
             }
             _linkStatus.value = _linkStatus.value.copy(lastAutoSyncMs = now)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.d("GalaxyWatchBridge", "5s watch step poll skipped: ${e.message}")
+            Log.d(TAG, "5s watch step poll skipped: ${e.message}")
             _linkStatus.value = _linkStatus.value.copy(lastAutoSyncMs = now)
         }
         return results
@@ -460,7 +763,7 @@ class GalaxyWatchBridge(context: Context) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.w("GalaxyWatchBridge", "Deferred watch HUD sync: ${e.message}")
+            Log.w(TAG, "Deferred watch HUD sync: ${e.message}")
             false
         }
     }
@@ -468,6 +771,7 @@ class GalaxyWatchBridge(context: Context) {
     suspend fun sendEncounterHapticToWatch(enemyName: String): Boolean {
         if (!_linkStatus.value.connected) return false
         val nodeId = _linkStatus.value.connectedNodeId ?: return false
+        if (nodeId.contains(":") || nodeId.startsWith("audio_")) return false
         return try {
             messageClient.sendMessage(
                 nodeId,
@@ -478,14 +782,53 @@ class GalaxyWatchBridge(context: Context) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.w("GalaxyWatchBridge", "Watch encounter alert skipped: ${e.message}")
+            Log.w(TAG, "Watch encounter alert skipped: ${e.message}")
             false
         }
     }
 
+    fun release() {
+        if (btReceiverRegistered) {
+            runCatching { appContext.unregisterReceiver(bluetoothReceiver) }
+            btReceiverRegistered = false
+        }
+        val am = audioManager
+        if (audioCallbackRegistered && am != null) {
+            runCatching { am.unregisterAudioDeviceCallback(audioDeviceCallback) }
+            audioCallbackRegistered = false
+        }
+        headsetProxy?.let { proxy ->
+            runCatching {
+                bluetoothManager?.adapter?.closeProfileProxy(BluetoothProfile.HEADSET, proxy)
+            }
+            headsetProxy = null
+        }
+        runCatching { dataClient.removeListener(dataChangedListener) }
+        runCatching {
+            capabilityClient.removeListener(
+                capabilityChangedListener,
+                WearDataPaths.CAPABILITY_SOLSTRIDE_WATCH_STEP_TRACKER
+            )
+        }
+        runCatching { messageClient.removeListener(messageReceivedListener) }
+        bridgeScope.cancel()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun extractBluetoothDevice(intent: Intent): BluetoothDevice? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+        } else {
+            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+        }
+    }
+
     private companion object {
-        const val CAPABILITY_QUERY_TIMEOUT_MS = 1_500L
-        const val HEARTBEAT_PING_TIMEOUT_MS = 1_500L
+        const val TAG = "GalaxyWatchBridge"
+        const val CAPABILITY_QUERY_TIMEOUT_MS = 1_200L
+        const val HEARTBEAT_PING_TIMEOUT_MS = 1_200L
         const val FRESH_STEP_ITEM_MAX_AGE_MS = 60_000L
+        const val ACL_DISCONNECT_SUPPRESSION_MS = 25_000L
+        const val PROFILE_TEARDOWN_GUARD_MS = 5_000L
     }
 }
