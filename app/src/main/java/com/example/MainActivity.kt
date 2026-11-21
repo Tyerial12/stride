@@ -16,7 +16,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.data.firebase.SolstrideFirestoreRepository
-import com.example.data.firebase.authStateFlow
+import com.example.data.firebase.safeAuthStateFlow
+import com.example.data.firebase.safeCurrentUser
 import com.example.data.local.SolstrideLocalDatabase
 import com.example.data.local.SolstridePreferences
 import com.example.data.local.SolstrideSettings
@@ -29,8 +30,6 @@ import com.example.ui.auth.AuthScreen
 import com.example.ui.theme.SolstrideDisplayMode
 import com.example.ui.theme.SolstrideTheme
 import com.example.wear.GalaxyWatchBridge
-import com.google.firebase.Firebase
-import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 
@@ -51,7 +50,7 @@ private fun SolstrideRoot() {
     val scope = rememberCoroutineScope()
     val preferences = remember(context) { SolstridePreferences(context.applicationContext) }
     val settings by preferences.settingsFlow.collectAsStateWithLifecycle(initialValue = SolstrideSettings())
-    val currentUser by Firebase.auth.authStateFlow().collectAsStateWithLifecycle(initialValue = Firebase.auth.currentUser)
+    val currentUser by safeAuthStateFlow(context).collectAsStateWithLifecycle(initialValue = safeCurrentUser(context))
 
     SolstrideTheme(displayMode = settings.displayMode) {
         val user = currentUser

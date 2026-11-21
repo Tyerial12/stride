@@ -7,6 +7,10 @@ on:
       - master
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 permissions:
@@ -14,6 +18,7 @@ permissions:
 
 jobs:
   build-apk:
+    name: Build Installable Android APK
     runs-on: ubuntu-latest
 
     steps:
@@ -52,15 +57,17 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Prepare signing keystore, Firebase config, and environment file
+      - name: Prepare signing keystore, Firebase config, and clean environment
         shell: bash
         env:
           GOOGLE_SERVICES_JSON_SECRET: ${{ secrets.GOOGLE_SERVICES_JSON }}
           DEBUG_KEYSTORE_BASE64_SECRET: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
+          set -e
+          # 1. Restore debug.keystore from GitHub Secret, repo base64 file, or generate fallback
           if [ -n "${DEBUG_KEYSTORE_BASE64_SECRET}" ] && [ ! -s debug.keystore ]; then
             printf '%s' "${DEBUG_KEYSTORE_BASE64_SECRET}" | tr -d '\r\n ' | base64 -d > debug.keystore || rm -f debug.keystore
-          elif [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
+          elif [ -s debug.keystore.base64 ] && [ ! -s debug.keystore ]; then
             (tr -d '\r\n ' < debug.keystore.base64 | base64 -d > debug.keystore) || rm -f debug.keystore
           fi
           if [ ! -s debug.keystore ]; then
@@ -76,30 +83,38 @@ jobs:
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
+
+          # 2. Restore app/google-services.json from GitHub Secret if provided
           if [ -n "${GOOGLE_SERVICES_JSON_SECRET}" ] && [ ! -s app/google-services.json ]; then
             printf '%s\n' "${GOOGLE_SERVICES_JSON_SECRET}" > app/google-services.json
           fi
+
+          # 3. Ensure firebase_applet_config.xml exists
+          mkdir -p app/src/main/res/values
           if [ ! -s app/src/main/res/values/firebase_applet_config.xml ]; then
-            mkdir -p app/src/main/res/values
-            cat << 'EOF' > app/src/main/res/values/firebase_applet_config.xml
-          <?xml version="1.0" encoding="utf-8" standalone="no"?>
-          <resources>
-              <string name="firestore_database_id" translatable="false">ai-studio-android-solstrid-53bf7141-bec2-4153-856e-085cbb45e845</string>
-          </resources>
-          EOF
+            printf '%s\n' \
+              '<?xml version="1.0" encoding="utf-8" standalone="no"?>' \
+              '<resources>' \
+              '    <string name="firestore_database_id" translatable="false">ai-studio-android-solstrid-53bf7141-bec2-4153-856e-085cbb45e845</string>' \
+              '</resources>' > app/src/main/res/values/firebase_applet_config.xml
           fi
-          if [ ! -s app/google-services.json ] && ! grep -q "default_web_client_id" app/src/main/res/values/strings.xml; then
-            cat << 'EOF' > app/src/main/res/values/ci_auth_fallback.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <string name="default_web_client_id" translatable="false">missing_google_services_secret</string>
-          </resources>
-          EOF
+
+          # 4. Provide non-secret fallback default_web_client_id only if google-services.json does not supply one
+          rm -f app/src/main/res/values/ci_auth_fallback.xml
+          if [ ! -s app/google-services.json ] || ! grep -q '"client_type"[[:space:]]*:[[:space:]]*3' app/google-services.json; then
+            if ! grep -q 'name="default_web_client_id"' app/src/main/res/values/*.xml 2>/dev/null; then
+              printf '%s\n' \
+                '<?xml version="1.0" encoding="utf-8"?>' \
+                '<resources>' \
+                '    <string name="default_web_client_id" translatable="false">missing_google_services_secret</string>' \
+                '</resources>' > app/src/main/res/values/ci_auth_fallback.xml
+            fi
           fi
-          # Ensure an empty .env is used so no API keys or secrets are packaged into BuildConfig
+
+          # 5. Truncate .env so no API keys or secrets are compiled into BuildConfig inside the APK
           : > .env
 
-      - name: Build Solstride Debug APK
+      - name: Build Solstride APK
         shell: bash
         env:
           GRADLE_OPTS: "-Xmx512m"
@@ -128,16 +143,20 @@ jobs:
           fi
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Prepare versioned APK filename
+      - name: Package versioned APK files
         id: meta
         shell: bash
         run: |
+          set -e
           VERSION_NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
           VERSION_CODE=$(grep -E 'versionCode\s*=' app/build.gradle.kts | head -n 1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')
           VERSION_NAME="${VERSION_NAME:-25.0}"
           VERSION_CODE="${VERSION_CODE:-25}"
           APK_NAME="Solstride-v${VERSION_NAME}.apk"
+          mkdir -p dist
           cp app/build/outputs/apk/debug/app-debug.apk "${APK_NAME}"
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/${APK_NAME}"
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/Solstride-latest.apk"
           echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
           echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
           echo "apk_name=${APK_NAME}" >> "$GITHUB_OUTPUT"
@@ -146,11 +165,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Solstride-v${{ steps.meta.outputs.version_name }}-apk
-          path: ${{ steps.meta.outputs.apk_name }}
+          path: |
+            ${{ steps.meta.outputs.apk_name }}
+            dist/Solstride-latest.apk
           if-no-files-found: error
+          retention-days: 90
 
       - name: Publish GitHub Release with APK
         id: gh_release
+        if: github.event_name != 'pull_request'
         continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
@@ -159,18 +182,22 @@ jobs:
           body: |
             Automated Solstride Android APK build (`com.aistudio.solstride.kxmrvq`, version `${{ steps.meta.outputs.version_name }}`, build `${{ steps.meta.outputs.version_code }}`).
 
-            Includes Android Health Connect & Samsung Health compatibility, CapabilityClient + Heartbeat Watch-priority automatic pedometer, and closed-app background step sync.
-          files: ${{ steps.meta.outputs.apk_name }}
+            - **Direct Install APK**: Download `${{ steps.meta.outputs.apk_name }}` below and open it on your Android device.
+            - **Features**: Android Health Connect & Samsung Health integration, CapabilityClient + Heartbeat Watch-priority automatic pedometer, and closed-app background step sync.
+            - **Security**: Built without embedded `.env` API keys (`ignoreList` configured in `app/build.gradle.kts`).
+          files: |
+            ${{ steps.meta.outputs.apk_name }}
+            dist/Solstride-latest.apk
           make_latest: true
 
       - name: Summarize APK download status
         shell: bash
         run: |
           echo "### Solstride APK Build Succeeded" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **APK**: \`${{ steps.meta.outputs.apk_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **APK File**: \`${{ steps.meta.outputs.apk_name }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Version**: \`${{ steps.meta.outputs.version_name }}\` (Build \`${{ steps.meta.outputs.version_code }}\`)" >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ steps.gh_release.outcome }}" = "success" ]; then
             echo "- **GitHub Release**: Published tag \`v${{ steps.meta.outputs.version_name }}\`" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "- **GitHub Release**: Skipped (enable **Settings → Actions → General → Workflow permissions → Read and write permissions** to auto-publish Releases). You can still download the APK directly from the **Artifacts** section of this workflow run." >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Download**: Download the installable APK directly from the **Artifacts** section at the bottom of this workflow run summary." >> "$GITHUB_STEP_SUMMARY"
           fi

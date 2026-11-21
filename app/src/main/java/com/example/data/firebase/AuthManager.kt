@@ -15,6 +15,7 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
@@ -24,11 +25,40 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 private const val AUTH_TAG = "Auth"
+
+fun isFirebaseConfigured(context: Context): Boolean {
+    return try {
+        FirebaseApp.getApps(context).isNotEmpty()
+    } catch (_: Exception) {
+        false
+    }
+}
+
+fun safeCurrentUser(context: Context): FirebaseUser? {
+    return try {
+        if (isFirebaseConfigured(context)) Firebase.auth.currentUser else null
+    } catch (_: Exception) {
+        null
+    }
+}
+
+fun safeAuthStateFlow(context: Context): Flow<FirebaseUser?> {
+    return if (!isFirebaseConfigured(context)) {
+        flowOf(null)
+    } else {
+        try {
+            Firebase.auth.authStateFlow()
+        } catch (_: Exception) {
+            flowOf(null)
+        }
+    }
+}
 
 fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
     val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
@@ -51,7 +81,11 @@ fun attemptAutoSignIn(
     onUnauthenticated: () -> Unit,
     scope: CoroutineScope
 ) {
-    if (Firebase.auth.currentUser != null) {
+    if (!isFirebaseConfigured(context)) {
+        onUnauthenticated()
+        return
+    }
+    if (safeCurrentUser(context) != null) {
         onAuthSuccess()
         return
     }

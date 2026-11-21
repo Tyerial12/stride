@@ -94,7 +94,7 @@ class StepBackgroundSyncWorker(
         val preferences = SolstridePreferences(applicationContext)
         val localDb = SolstrideLocalDatabase.getInstance(applicationContext)
         val dao = localDb.offlineSyncDao()
-        val activeUid = Firebase.auth.currentUser?.uid ?: "__WATCH_UNBOUND__"
+        val activeUid = com.example.data.firebase.safeCurrentUser(applicationContext)?.uid ?: "__WATCH_UNBOUND__"
         val now = System.currentTimeMillis()
 
         try {
@@ -177,7 +177,7 @@ class StepBackgroundSyncWorker(
             }
 
             // 4. If signed in and online, merge queued step batches into Cloud Firestore
-            val signedInUid = Firebase.auth.currentUser?.uid
+            val signedInUid = com.example.data.firebase.safeCurrentUser(applicationContext)?.uid
             if (signedInUid != null) {
                 dao.claimUnboundWatchBatches(signedInUid)
                 flushToCloudInBackground(signedInUid, dao, preferences)

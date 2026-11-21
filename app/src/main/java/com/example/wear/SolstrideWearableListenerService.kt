@@ -93,7 +93,7 @@ class SolstrideWearableListenerService :
     override fun onDataChanged(dataEvents: DataEventBuffer) {
         val dao = SolstrideLocalDatabase.getInstance(applicationContext).offlineSyncDao()
         val preferences = SolstridePreferences(applicationContext)
-        val activeUid = Firebase.auth.currentUser?.uid ?: "__WATCH_UNBOUND__"
+        val activeUid = com.example.data.firebase.safeCurrentUser(applicationContext)?.uid ?: "__WATCH_UNBOUND__"
         val now = System.currentTimeMillis()
 
         val pendingBatches = mutableListOf<PendingStepBatchEntity>()
@@ -282,7 +282,7 @@ class SolstrideWearableListenerService :
                 )
                 val dao = SolstrideLocalDatabase.getInstance(applicationContext).offlineSyncDao()
                 val preferences = SolstridePreferences(applicationContext)
-                val activeUid = Firebase.auth.currentUser?.uid ?: "__WATCH_UNBOUND__"
+                val activeUid = com.example.data.firebase.safeCurrentUser(applicationContext)?.uid ?: "__WATCH_UNBOUND__"
                 serviceScope.launch {
                     preferences.setLastWatchStepReceivedMs(now)
                     dao.insertBatch(
