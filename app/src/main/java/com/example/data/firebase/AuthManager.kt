@@ -61,6 +61,10 @@ fun attemptAutoSignIn(
         onUnauthenticated()
         return
     }
+    if (clientId.isBlank() || clientId == "missing_google_services_secret") {
+        onUnauthenticated()
+        return
+    }
     val googleIdOption = GetGoogleIdOption.Builder()
         .setFilterByAuthorizedAccounts(true)
         .setServerClientId(clientId)
@@ -99,6 +103,10 @@ fun onGoogleSignInClicked(
         context.getString(R.string.default_web_client_id)
     } catch (_: Exception) {
         onAuthError("Google Sign-In configuration missing: default_web_client_id not found")
+        return
+    }
+    if (clientId.isBlank() || clientId == "missing_google_services_secret") {
+        onAuthError("Google Sign-In requires GOOGLE_SERVICES_JSON to be configured in repository secrets.")
         return
     }
     val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()

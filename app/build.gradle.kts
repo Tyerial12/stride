@@ -71,11 +71,13 @@ android {
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
-// to match the convention used in Web projects.
+// to match the convention used in Web projects, while excluding unused API keys from the APK.
 secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
   ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
+  ignoreList.add("GEMINI_API_KEY")
+  ignoreList.add(".*API_KEY.*")
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
