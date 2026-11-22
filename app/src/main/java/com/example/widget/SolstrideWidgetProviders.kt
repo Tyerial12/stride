@@ -370,7 +370,7 @@ class SolstridePetWidgetProvider : BaseSolstrideWidgetProvider() {
                 )
                 views.setTextViewText(
                     R.id.pet_mood_wins_label,
-                    "❤ ${snapshot.petMoodPct}% • 🍖 ${snapshot.petStepTreats} • 🏆 ${snapshot.petTotalWildWins}W"
+                    "❤ ${snapshot.petMoodPct}% • 🪙 ${snapshot.solCoins}c • 🏆 ${snapshot.petTotalWildWins}W"
                 )
                 views.setProgressBar(R.id.pet_xp_progress, 100, snapshot.petXpPercent(), false)
                 views.setTextViewText(R.id.pet_synergy_line, "Synergy: ${snapshot.petBonusSummary}")
@@ -379,12 +379,12 @@ class SolstridePetWidgetProvider : BaseSolstrideWidgetProvider() {
                 views.setTextViewText(R.id.pet_name, "🐾 Interactive Pet Arena")
                 views.setTextViewText(R.id.pet_meta, "No Companion Equipped • Visit Sanctuary")
                 views.setTextViewText(R.id.pet_xp_label, "Exclusive Widget Pet Leveling")
-                views.setTextViewText(R.id.pet_mood_wins_label, "🍖 ${snapshot.petStepTreats} Treats")
+                views.setTextViewText(R.id.pet_mood_wins_label, "🪙 ${snapshot.solCoins} Sol Coins")
                 views.setProgressBar(R.id.pet_xp_progress, 100, 0, false)
                 views.setTextViewText(R.id.pet_synergy_line, "Adopt a companion for Hero ATK/DEF Synergy")
                 views.setTextViewText(
                     R.id.pet_battle_log,
-                    "Close app & tap Feed or Wild Fight to level your pet!"
+                    "Close app & tap Feed (${WildPetBattleEngine.FEED_SOL_COIN_COST} Coins) or Wild Fight!"
                 )
             }
 
@@ -394,8 +394,7 @@ class SolstridePetWidgetProvider : BaseSolstrideWidgetProvider() {
                 views.setTextViewText(R.id.pet_fight_btn, "🔒 APP OPEN")
                 views.setInt(R.id.pet_fight_btn, "setBackgroundResource", R.drawable.widget_bg_alert_crimson)
             } else {
-                val feedLabel = if (snapshot.petStepTreats > 0) "🍖 FEED (Treat)" else "🍖 FEED (5c)"
-                views.setTextViewText(R.id.pet_feed_btn, feedLabel)
+                views.setTextViewText(R.id.pet_feed_btn, "🍖 FEED (${WildPetBattleEngine.FEED_SOL_COIN_COST}c)")
                 views.setInt(R.id.pet_feed_btn, "setBackgroundResource", R.drawable.widget_bg_badge_emerald)
                 views.setTextViewText(R.id.pet_fight_btn, "⚔ WILD FIGHT (-1⚡)")
                 views.setInt(R.id.pet_fight_btn, "setBackgroundResource", R.drawable.widget_bg_badge_violet)

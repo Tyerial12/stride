@@ -150,6 +150,7 @@ data class BattleState(
     val heroBarrier: Int = 0,
     val heroStatuses: List<ActiveCombatStatus> = emptyList(),
     val elixirCooldownTurns: Int = 0,
+    val skillCooldowns: List<Int> = listOf(0, 0, 0),
     val hardcoreOathActive: Boolean = false,
     val stakedSolCoins: Long = 0L,
     val guarding: Boolean = false,
@@ -522,7 +523,7 @@ object CombatEngine {
         if (elemMult > 1.05f) callouts.add("SUPER EFFECTIVE (${stats.activeElement.label})!")
 
         val overdrive = battle.valor >= 100
-        val sunbladeBonus = if (profile.resolvedClass() == HeroClass.SUNBLADE) 1.25f else 1.0f
+        val arcanistBonus = if (profile.resolvedClass() == HeroClass.ARCANIST) 1.25f else 1.0f
         val gearSkillBonus = 1.0f + (stats.solarSkillBonusPercent / 100f)
         val overdriveMult = if (overdrive) 2.25f else 1.65f
         val isCrit = overdrive || Random.nextInt(100) < (stats.critChancePercent + 12)
@@ -537,7 +538,7 @@ object CombatEngine {
 
         val rawDmg = max(
             16,
-            (stats.totalAttack * overdriveMult * sunbladeBonus * gearSkillBonus * critMult * elemMult).roundToInt() - (effectiveDef / 3)
+            (stats.totalAttack * overdriveMult * arcanistBonus * gearSkillBonus * critMult * elemMult).roundToInt() - (effectiveDef / 3)
         )
         val shatteredShield = if (overdrive) 0 else (enemy.shield - min(enemy.shield, rawDmg)).coerceAtLeast(0)
         val hpDmg = if (overdrive) rawDmg else (rawDmg - min(enemy.shield, rawDmg)).coerceAtLeast(8)
@@ -584,6 +585,197 @@ object CombatEngine {
             heroDamageDealt = hpDmg,
             dealtCrit = isCrit,
             lifestealHeal = lifestealHeal,
+            callouts = callouts
+        )
+    }
+
+    /**
+     * Executes one of the hero's 3 level-unlocked, Sol-Coin-upgradable Class Active Skills (index 0..2).
+     * Consumes Valor (built via Strike/Guard) and tracks per-skill turn cooldowns cleanly.
+     */
+    fun executeClassActiveSkill(
+        skillIndex: Int,
+        battle: BattleState,
+        profile: HeroProfile,
+        stats: DerivedHeroStats
+    ): TurnResolution {
+        val enemy = battle.enemy ?: return TurnResolution(battle, profile.currentHp, profile.strideEnergy)
+        val activeSkills = ClassSkillCatalog.activeSkillsFor(profile.resolvedClass())
+        val skill = activeSkills.getOrNull(skillIndex)
+            ?: return TurnResolution(battle, profile.currentHp, profile.strideEnergy)
+
+        if (!skill.isUnlockedAt(profile.level.toInt())) {
+            val log = (battle.combatLog + "${skill.name} unlocks at Hero Level ${skill.unlockLevel}!").takeLast(9)
+            return TurnResolution(battle.copy(combatLog = log), profile.currentHp, profile.strideEnergy)
+        }
+        val rank = ClassSkillCatalog.effectiveRank(profile, skill)
+        if (rank <= 0) {
+            val log = (battle.combatLog + "Train ${skill.name} Rank I with Sol Coins at the Skill Shrine or Skills tab!").takeLast(9)
+            return TurnResolution(battle.copy(combatLog = log), profile.currentHp, profile.strideEnergy)
+        }
+        val currentCd = battle.skillCooldowns.getOrElse(skillIndex) { 0 }
+        if (currentCd > 0) {
+            val log = (battle.combatLog + "${skill.name} is on cooldown ($currentCd turn(s) left).").takeLast(9)
+            return TurnResolution(battle.copy(combatLog = log), profile.currentHp, profile.strideEnergy)
+        }
+        if (battle.valor < skill.valorCost) {
+            val log = (battle.combatLog + "${skill.name} needs ${skill.valorCost} Valor (currently ${battle.valor}). Use Strike or Guard!").takeLast(9)
+            return TurnResolution(battle.copy(combatLog = log), profile.currentHp, profile.strideEnergy)
+        }
+
+        val callouts = mutableListOf("${skill.name.uppercase()} R$rank!")
+        val elemMult = stats.activeElement.damageMultiplierAgainst(enemy.elementalAffinity)
+        if (elemMult > 1.05f) callouts.add("SUPER EFFECTIVE!")
+
+        val rankMult = skill.effectiveMultiplier(rank)
+        val gearSkillBonus = 1.0f + (stats.solarSkillBonusPercent / 100f)
+        val enemySundered = enemy.statuses.any { it.type == CombatStatusType.SUNDER }
+        val enemyDebuffed = enemy.statuses.any { !it.type.isBuff }
+
+        var extraCritPct = 0
+        var guaranteedCrit = false
+        var extraPiercePct = if (enemySundered) 35 else 0
+        var bonusFlatPower = 0
+        var conditionalMult = 1.0f
+        var barrierGain = 0
+        var directHeal = 0
+        var extraLifestealPct = 0
+        var valorRefund = 0
+        var updatedStatuses = enemy.statuses
+
+        when (skill.activeEffect) {
+            ActiveSkillEffect.SUNBREAKER_BASH -> {
+                updatedStatuses = applyOrRefreshStatus(updatedStatuses, ActiveCombatStatus(CombatStatusType.SUNDER, 3, 35))
+                callouts.add("SUNDER 3T")
+                val stunChance = (30 + (rank - 1) * 6).coerceAtMost(60)
+                if (Random.nextInt(100) < stunChance) {
+                    updatedStatuses = applyOrRefreshStatus(updatedStatuses, ActiveCombatStatus(CombatStatusType.STUN, 1, 1))
+                    callouts.add("STUNNED!")
+                }
+            }
+            ActiveSkillEffect.AEGIS_BULWARK -> {
+                val pct = 0.26f + ((rank - 1) * 0.05f)
+                barrierGain = max(18, (stats.computedMaxHp * pct).roundToInt())
+                callouts.add("AEGIS +$barrierGain")
+            }
+            ActiveSkillEffect.SOLAR_JUDGMENT -> {
+                bonusFlatPower = (stats.totalDefense * 0.65f).roundToInt()
+                val healPct = 0.12f + ((rank - 1) * 0.02f)
+                directHeal = max(14, (stats.computedMaxHp * healPct).roundToInt())
+                callouts.add("+$directHeal HP")
+            }
+            ActiveSkillEffect.PYRE_BOLT -> {
+                val burnPotency = max(12, ((stats.totalAttack * (0.34f + rank * 0.06f))).roundToInt())
+                updatedStatuses = applyOrRefreshStatus(updatedStatuses, ActiveCombatStatus(CombatStatusType.BURN, 3, burnPotency))
+                callouts.add("SCORCH BURN ($burnPotency/T)")
+            }
+            ActiveSkillEffect.ASTRAL_NOVA -> {
+                extraPiercePct += 35 + ((rank - 1) * 3)
+                valorRefund = 12
+                callouts.add("+12 VALOR")
+            }
+            ActiveSkillEffect.ECLIPSE_METEOR -> {
+                val burnPotency = max(16, ((stats.totalAttack * (0.42f + rank * 0.07f))).roundToInt())
+                updatedStatuses = applyOrRefreshStatus(updatedStatuses, ActiveCombatStatus(CombatStatusType.BURN, 3, burnPotency))
+                updatedStatuses = applyOrRefreshStatus(updatedStatuses, ActiveCombatStatus(CombatStatusType.SUNDER, 3, 35))
+                callouts.add("METEOR BURN + SUNDER")
+            }
+            ActiveSkillEffect.FROSTBITE_SHOT -> {
+                extraCritPct += (rank - 1) * 3
+                updatedStatuses = applyOrRefreshStatus(updatedStatuses, ActiveCombatStatus(CombatStatusType.FROSTBITE, 3, 25))
+                callouts.add("FROSTBITE -25% ATK")
+            }
+            ActiveSkillEffect.GALE_VOLLEY -> {
+                extraCritPct += 20 + ((rank - 1) * 4)
+                callouts.add("3-ARROW VOLLEY!")
+            }
+            ActiveSkillEffect.HORIZON_SNIPE -> {
+                guaranteedCrit = true
+                extraPiercePct += 40
+                callouts.add("GUARANTEED CRIT!")
+            }
+            ActiveSkillEffect.VENOM_FANG -> {
+                extraPiercePct += 15
+                val poisonPotency = max(12, ((stats.totalAttack * (0.35f + rank * 0.06f))).roundToInt())
+                updatedStatuses = applyOrRefreshStatus(updatedStatuses, ActiveCombatStatus(CombatStatusType.POISON, 3, poisonPotency))
+                callouts.add("VOID POISON ($poisonPotency/T)")
+            }
+            ActiveSkillEffect.PHANTOM_STEP -> {
+                extraLifestealPct = 30
+                val shieldPct = 0.14f + ((rank - 1) * 0.04f)
+                barrierGain = max(14, (stats.computedMaxHp * shieldPct).roundToInt())
+                callouts.add("SHADOW BARRIER +$barrierGain")
+            }
+            ActiveSkillEffect.NIGHTFALL_EXECUTION -> {
+                if (enemyDebuffed) {
+                    conditionalMult = 1.40f
+                    callouts.add("EXECUTE +40%!")
+                }
+                extraPiercePct += 25
+            }
+            null -> {}
+        }
+
+        val isCrit = guaranteedCrit || Random.nextInt(100) < (stats.critChancePercent + extraCritPct)
+        val critMult = if (isCrit) 1.50f else 1.0f
+        if (isCrit && !guaranteedCrit) callouts.add("SKILL CRIT!")
+
+        val totalPierce = (stats.armorPiercePercent + extraPiercePct).coerceAtMost(92)
+        val effectiveDef = ((enemy.defense * (100 - totalPierce)) / 100f).roundToInt()
+
+        val rawDmg = max(
+            14,
+            (((stats.totalAttack + bonusFlatPower) * rankMult * gearSkillBonus * conditionalMult * critMult * elemMult).roundToInt()) - (effectiveDef / 3)
+        )
+        val shieldAbsorbed = min(enemy.shield, rawDmg)
+        val hpDmg = (rawDmg - shieldAbsorbed).coerceAtLeast(if (rawDmg > 0) 6 else 0)
+        val nextEnemyHp = (enemy.currentHp - hpDmg).coerceAtLeast(0)
+        val nextEnemyShield = (enemy.shield - shieldAbsorbed).coerceAtLeast(0)
+
+        var nextHeroHp = profile.currentHp
+        var totalHeal = directHeal
+        val effectiveLifesteal = stats.lifestealPercent + extraLifestealPct
+        if (effectiveLifesteal > 0 && hpDmg > 0) {
+            val leech = max(3, (hpDmg * effectiveLifesteal) / 100)
+            totalHeal += leech
+            callouts.add("Leech +$leech HP")
+        }
+        if (totalHeal > 0) {
+            nextHeroHp = (nextHeroHp + totalHeal).coerceAtMost(stats.computedMaxHp.toLong())
+        }
+
+        val nextValor = (battle.valor - skill.valorCost + valorRefund).coerceIn(0, 100)
+        val nextSynergy = (battle.petSynergy + 30).coerceAtMost(100)
+        val nextCooldowns = List(3) { idx ->
+            if (idx == skillIndex) (skill.cooldownTurns + 1) else battle.skillCooldowns.getOrElse(idx) { 0 }
+        }
+
+        val logLine = "${skill.name} (Rank $rank) strikes for $hpDmg DMG" +
+            (if (barrierGain > 0) " • +$barrierGain Barrier" else "") +
+            (if (totalHeal > 0) " • +$totalHeal HP" else "") + "!"
+
+        val midState = battle.copy(
+            valor = nextValor,
+            petSynergy = nextSynergy,
+            heroBarrier = battle.heroBarrier + barrierGain,
+            skillCooldowns = nextCooldowns,
+            guarding = skill.activeEffect == ActiveSkillEffect.AEGIS_BULWARK,
+            enemy = enemy.copy(
+                currentHp = nextEnemyHp,
+                shield = nextEnemyShield,
+                statuses = updatedStatuses
+            ),
+            combatLog = (battle.combatLog + logLine).takeLast(9)
+        )
+
+        return resolveAfterPlayerAction(
+            battle = midState,
+            profile = profile.copy(currentHp = nextHeroHp),
+            stats = stats,
+            heroAction = BattleAnimAction.HERO_SOLAR_SKILL,
+            heroDamageDealt = hpDmg + shieldAbsorbed,
+            dealtCrit = isCrit,
+            lifestealHeal = totalHeal,
             callouts = callouts
         )
     }
@@ -639,14 +831,14 @@ object CombatEngine {
                 )
                 callouts.add("ENEMY STUNNED!")
             }
-            ClassSpecialization.GALE_RANGER -> {
+            ClassSpecialization.GALE_RANGER, ClassSpecialization.STORM_WARDEN -> {
                 updatedEnemyStatuses = applyOrRefreshStatus(
                     updatedEnemyStatuses,
                     ActiveCombatStatus(CombatStatusType.FROSTBITE, 3, 25)
                 )
                 callouts.add("FROSTBITE -25% ATK!")
             }
-            ClassSpecialization.MIRAGE_ASSASSIN -> {
+            ClassSpecialization.MIRAGE_ASSASSIN, ClassSpecialization.NIGHTFALL_REAPER -> {
                 updatedEnemyStatuses = applyOrRefreshStatus(
                     updatedEnemyStatuses,
                     ActiveCombatStatus(CombatStatusType.POISON, 3, max(12, stats.totalAttack / 2))
@@ -678,7 +870,10 @@ object CombatEngine {
 
         // Apply Pet Companion Combo Bonus
         var comboHeal = (stats.computedMaxHp * (petType?.comboHealPct ?: 0.15f)).roundToInt()
-        if (spec == ClassSpecialization.ECLIPSE_INQUISITOR || spec == ClassSpecialization.MIRAGE_ASSASSIN) {
+        if (spec == ClassSpecialization.ECLIPSE_INQUISITOR ||
+            spec == ClassSpecialization.MIRAGE_ASSASSIN ||
+            spec == ClassSpecialization.NIGHTFALL_REAPER
+        ) {
             comboHeal += (rawDmg * 0.25f).roundToInt()
         }
         var nextBarrier = battle.heroBarrier
@@ -847,6 +1042,9 @@ object CombatEngine {
         var enemy = battle.enemy ?: return TurnResolution(battle, profile.currentHp, profile.strideEnergy, consumedElixirId)
         val seqId = System.currentTimeMillis()
         val nextCooldown = (battle.elixirCooldownTurns - 1).coerceAtLeast(0)
+        val nextSkillCooldowns = List(3) { idx ->
+            (battle.skillCooldowns.getOrElse(idx) { 0 } - 1).coerceAtLeast(0)
+        }
 
         // 1. Tick Enemy DoT Status Effects (Burn & Poison) before checking death
         var enemyDotDamage = 0
@@ -890,6 +1088,7 @@ object CombatEngine {
                         currentWave = nextWave,
                         turnNumber = battle.turnNumber + 1,
                         elixirCooldownTurns = nextCooldown,
+                        skillCooldowns = nextSkillCooldowns,
                         guarding = false,
                         enemy = nextEnemy,
                         combatLog = waveLogs,
@@ -914,8 +1113,8 @@ object CombatEngine {
             val hcRewardMult = if (battle.hardcoreOathActive) 1.50f else 1.0f
             val baseXp = ((if (enemy.isBoss) 95L else 48L) + (enemy.level * 16L))
             val xpEarned = (baseXp * stats.totalXpMultiplier * hcRewardMult).roundToInt().toLong().coerceAtLeast(30L)
-            val baseShards = ((if (enemy.isBoss) 65L else 28L) + (enemy.level * 9L))
-            val shardsEarned = (baseShards * stats.totalSunshardMultiplier * hcRewardMult).roundToInt().toLong().coerceAtLeast(20L)
+            val baseShards = ((if (enemy.isBoss) 28L else 11L) + (enemy.level * 4L))
+            val shardsEarned = (baseShards * stats.totalSunshardMultiplier * hcRewardMult).roundToInt().toLong().coerceAtLeast(8L)
 
             val wagerProfit = if (battle.stakedSolCoins > 0L) battle.stakedSolCoins else 0L
             val baseCoins = when {
@@ -1188,7 +1387,7 @@ object CombatEngine {
                 stageNumber = battle.stageNumber,
                 spireFloor = battle.spireFloor,
                 xpEarned = consolationXp,
-                sunshardsEarned = 8L,
+                sunshardsEarned = 3L,
                 solCoinsLost = totalCoinsLost,
                 woundInflicted = true,
                 gearDurabilityLossPct = 14,
@@ -1219,6 +1418,7 @@ object CombatEngine {
                 heroBarrier = nextHeroBarrier,
                 heroStatuses = tickedHeroStatuses,
                 elixirCooldownTurns = nextCooldown,
+                skillCooldowns = nextSkillCooldowns,
                 guarding = false,
                 enemy = enemy.copy(
                     statuses = tickedEnemyStatuses,

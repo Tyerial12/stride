@@ -7,7 +7,7 @@
       "properties": {
         "userId": { "type": "string", "description": "Authenticated Firebase UID owning this hero profile." },
         "displayName": { "type": "string", "description": "Hero display name shown in hub and leaderboard." },
-        "heroClass": { "type": "string", "enum": ["VANGUARD", "STRIDER", "SUNBLADE"], "description": "Chosen tactical archetype." },
+        "heroClass": { "type": "string", "enum": ["VANGUARD", "ARCANIST", "RANGER", "SHADOWBLADE", "STRIDER", "SUNBLADE"], "description": "Chosen tactical archetype (4 remade classes plus legacy aliases)." },
         "level": { "type": "integer", "description": "Current hero level." },
         "xp": { "type": "integer", "description": "Experience points within the current level." },
         "xpToNextLevel": { "type": "integer", "description": "Experience required to reach the next level." },
@@ -47,6 +47,8 @@
         "dailyChestsOpened": { "type": "integer", "description": "Loot chests opened today for daily quests." },
         "claimedQuestIds": { "type": "array", "description": "Bounded list of claimed daily/weekly/milestone quest IDs (max 40)." },
         "chestsOpenedTotal": { "type": "integer", "description": "Lifetime count of loot chests cracked open." },
+        "avatarConfig": { "type": "string", "description": "Compact 6-index 2D hero appearance vector (hairStyle,hairColor,skinTone,eyeColor,outfitPalette,aura)." },
+        "characterCreated": { "type": "boolean", "description": "Whether the player has completed Hero Naming, Class, and 2D Avatar Customization." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp() on creation." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp() on each update." }
       },
@@ -141,7 +143,7 @@
       "properties": {
         "userId": { "type": "string", "description": "Authenticated Firebase UID matching document ID." },
         "displayName": { "type": "string", "description": "Public hero callsign." },
-        "heroClass": { "type": "string", "enum": ["VANGUARD", "STRIDER", "SUNBLADE"], "description": "Hero class badge." },
+        "heroClass": { "type": "string", "enum": ["VANGUARD", "ARCANIST", "RANGER", "SHADOWBLADE", "STRIDER", "SUNBLADE"], "description": "Hero class badge." },
         "heroLevel": { "type": "integer", "description": "Current hero level." },
         "heroPower": { "type": "integer", "description": "Current composite Hero Power rating." },
         "weeklySteps": { "type": "integer", "description": "Steps walked during weekKey." },
@@ -158,12 +160,133 @@
         "weeklySteps", "weekKey", "bossesDefeated", "publicVisible",
         "createdAt", "updatedAt"
       ]
+    },
+    "TownPresencePlayer": {
+      "title": "TownPresencePlayer",
+      "description": "Real-time non-PII multiplayer presence for a signed-in player walking inside Sunhaven Plaza.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Authenticated Firebase UID matching document ID." },
+        "displayName": { "type": "string", "description": "Custom Hero Name shown above the 2D avatar in Sunhaven Plaza." },
+        "heroClass": { "type": "string", "enum": ["VANGUARD", "ARCANIST", "RANGER", "SHADOWBLADE", "STRIDER", "SUNBLADE"], "description": "Playable class crest." },
+        "heroLevel": { "type": "integer", "description": "Current Hero Level." },
+        "heroPower": { "type": "integer", "description": "Composite Hero Power score." },
+        "prestigeLevel": { "type": "integer", "description": "Solar Ascension prestige rank." },
+        "avatarConfig": { "type": "string", "description": "6-index 2D avatar appearance configuration." },
+        "equippedPetId": { "type": "string", "description": "Equipped companion pet ID or empty string." },
+        "equippedPetLevel": { "type": "integer", "description": "Level of the player's equipped companion pet (1..50)." },
+        "posX": { "type": "number", "description": "Normalized horizontal plaza coordinate (0.0..1.0)." },
+        "posY": { "type": "number", "description": "Normalized vertical plaza coordinate (0.0..1.0)." },
+        "facingRight": { "type": "boolean", "description": "Avatar horizontal facing direction." },
+        "emote": { "type": "string", "description": "Short quick-emote speech bubble text." },
+        "inTown": { "type": "boolean", "description": "Explicit town presence visibility flag enforced by queries and rules." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp of latest movement or heartbeat." }
+      },
+      "required": [
+        "userId", "displayName", "heroClass", "heroLevel", "heroPower",
+        "prestigeLevel", "avatarConfig", "equippedPetId", "posX", "posY",
+        "facingRight", "emote", "inTown", "updatedAt"
+      ]
+    },
+    "MultiplayerChatMessage": {
+      "title": "MultiplayerChatMessage",
+      "description": "Real-time multiplayer global tavern chat message sent by an authenticated player.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Sender Firebase UID." },
+        "displayName": { "type": "string", "description": "Sender Hero Name." },
+        "heroClass": { "type": "string", "enum": ["VANGUARD", "ARCANIST", "RANGER", "SHADOWBLADE", "STRIDER", "SUNBLADE"], "description": "Sender class badge." },
+        "heroLevel": { "type": "integer", "description": "Sender hero level." },
+        "avatarConfig": { "type": "string", "description": "Sender 6-index 2D avatar config." },
+        "equippedPetId": { "type": "string", "description": "Sender equipped pet ID or empty string." },
+        "message": { "type": "string", "description": "Chat message body (1..240 characters)." },
+        "channel": { "type": "string", "enum": ["GLOBAL"], "description": "Chat channel filter." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp when message was sent." }
+      },
+      "required": [
+        "userId", "displayName", "heroClass", "heroLevel",
+        "avatarConfig", "equippedPetId", "message", "channel", "createdAt"
+      ]
+    },
+    "MultiplayerDuel": {
+      "title": "MultiplayerDuel",
+      "description": "Real-time turn-based PvP Hero Duel between two authenticated players.",
+      "type": "object",
+      "properties": {
+        "participantUids": { "type": "array", "description": "Exact 2-element array [challengerUid, opponentUid] for membership checks." },
+        "challengerUid": { "type": "string", "description": "UID of player initiating the duel." },
+        "challengerName": { "type": "string", "description": "Challenger hero display name." },
+        "challengerClass": { "type": "string", "enum": ["VANGUARD", "ARCANIST", "RANGER", "SHADOWBLADE", "STRIDER", "SUNBLADE"] },
+        "challengerLevel": { "type": "integer" },
+        "challengerPower": { "type": "integer" },
+        "challengerAvatar": { "type": "string" },
+        "challengerPetId": { "type": "string" },
+        "challengerHp": { "type": "integer" },
+        "challengerMaxHp": { "type": "integer" },
+        "challengerGuard": { "type": "boolean" },
+        "opponentUid": { "type": "string", "description": "UID of challenged player." },
+        "opponentName": { "type": "string", "description": "Opponent hero display name." },
+        "opponentClass": { "type": "string", "enum": ["VANGUARD", "ARCANIST", "RANGER", "SHADOWBLADE", "STRIDER", "SUNBLADE"] },
+        "opponentLevel": { "type": "integer" },
+        "opponentPower": { "type": "integer" },
+        "opponentAvatar": { "type": "string" },
+        "opponentPetId": { "type": "string" },
+        "opponentHp": { "type": "integer" },
+        "opponentMaxHp": { "type": "integer" },
+        "opponentGuard": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["PENDING", "ACTIVE", "COMPLETED", "DECLINED"] },
+        "turnUid": { "type": "string", "description": "UID of participant whose turn is currently active." },
+        "turnNumber": { "type": "integer" },
+        "winnerUid": { "type": "string" },
+        "lastActionLog": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "participantUids", "challengerUid", "challengerName", "challengerClass",
+        "challengerLevel", "challengerPower", "challengerAvatar", "challengerPetId",
+        "challengerHp", "challengerMaxHp", "challengerGuard",
+        "opponentUid", "opponentName", "opponentClass",
+        "opponentLevel", "opponentPower", "opponentAvatar", "opponentPetId",
+        "opponentHp", "opponentMaxHp", "opponentGuard",
+        "status", "turnUid", "turnNumber", "winnerUid", "lastActionLog",
+        "createdAt", "updatedAt"
+      ]
+    },
+    "MultiplayerPetPlaydate": {
+      "title": "MultiplayerPetPlaydate",
+      "description": "Real-time companion pet playdate session between two players with equipped pets.",
+      "type": "object",
+      "properties": {
+        "participantUids": { "type": "array", "description": "Exact 2-element array [hostUid, guestUid] for membership checks." },
+        "hostUid": { "type": "string" },
+        "hostName": { "type": "string" },
+        "hostPetType": { "type": "string", "enum": ["SUNFOX_KIT", "AEGIS_SCARAB", "DUNE_FALCON", "CINDER_LYNX", "OASIS_TORTOISE", "SOLAR_PHOENIX"] },
+        "hostPetLevel": { "type": "integer" },
+        "guestUid": { "type": "string" },
+        "guestName": { "type": "string" },
+        "guestPetType": { "type": "string", "enum": ["SUNFOX_KIT", "AEGIS_SCARAB", "DUNE_FALCON", "CINDER_LYNX", "OASIS_TORTOISE", "SOLAR_PHOENIX"] },
+        "guestPetLevel": { "type": "integer" },
+        "status": { "type": "string", "enum": ["PENDING", "PLAYING", "FINISHED", "DECLINED"] },
+        "activity": { "type": "string", "enum": ["CHASE", "FETCH", "SPAR", "NAP"] },
+        "playCount": { "type": "integer" },
+        "happinessBonus": { "type": "integer" },
+        "lastPlayLog": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "participantUids", "hostUid", "hostName", "hostPetType", "hostPetLevel",
+        "guestUid", "guestName", "guestPetType", "guestPetLevel",
+        "status", "activity", "playCount", "happinessBonus", "lastPlayLog",
+        "createdAt", "updatedAt"
+      ]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/HeroProfile" },
-      "description": "Private hero profile, Sol Coins, active pet reference, RPG progression (Realms, Spire, Skills, Quests, Prestige), and timed expedition state owned strictly by userId."
+      "description": "Private hero profile, Sol Coins, custom 2D avatar, class skills, active pet reference, RPG progression, and timed expedition state owned strictly by userId."
     },
     "/users/{userId}/inventory/{itemId}": {
       "schema": { "$ref": "#/entities/InventoryItem" },
@@ -171,7 +294,7 @@
     },
     "/users/{userId}/chests/{chestId}": {
       "schema": { "$ref": "#/entities/LootChest" },
-      "description": "Private sealed treasure chests waiting to be interactively looted by userId."
+      "description": "Private single-use sealed treasure chests owned by userId."
     },
     "/users/{userId}/pets/{petId}": {
       "schema": { "$ref": "#/entities/OwnedPet" },
@@ -180,6 +303,22 @@
     "/leaderboard/{userId}": {
       "schema": { "$ref": "#/entities/LeaderboardEntry" },
       "description": "Public competitive leaderboard entries readable by signed-in players via publicVisible query and writable strictly by the owner."
+    },
+    "/town_presence/{userId}": {
+      "schema": { "$ref": "#/entities/TownPresencePlayer" },
+      "description": "Live multiplayer player presence inside Sunhaven Plaza and Multiplayer lobby readable by signed-in players via inTown query and writable strictly by the owner."
+    },
+    "/multiplayer_chat/{messageId}": {
+      "schema": { "$ref": "#/entities/MultiplayerChatMessage" },
+      "description": "Real-time global chat messages readable by signed-in players via channel == GLOBAL query and writable strictly by the sender."
+    },
+    "/multiplayer_duels/{duelId}": {
+      "schema": { "$ref": "#/entities/MultiplayerDuel" },
+      "description": "Real-time PvP hero duels readable and updatable strictly by the two participants in participantUids."
+    },
+    "/multiplayer_pet_playdates/{playdateId}": {
+      "schema": { "$ref": "#/entities/MultiplayerPetPlaydate" },
+      "description": "Real-time companion pet playdates readable and updatable strictly by the two participants in participantUids."
     }
   }
 }

@@ -262,10 +262,10 @@ test("HeroProfile: owner create, RPG progression/skill/quest/prestige updates, l
     })
   );
 
-  // Reject out-of-range realm (> 5)
+  // Reject out-of-range realm (> 10)
   await assertFails(
     aliceDb.collection("users").doc(ALICE_UID).update({
-      currentRealm: 6,
+      currentRealm: 11,
       updatedAt: new Date(Date.now() - 500),
     })
   );
@@ -428,3 +428,278 @@ test("Leaderboard: publicVisible query succeeds, prestige/spire fields validated
     })
   );
 });
+
+test("HeroProfile: accepts 4 remade classes, avatarConfig, and characterCreated; rejects malformed avatarConfig", async () => {
+  const created = new Date(Date.now() - 10000);
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const base = validHeroProfile(ALICE_UID, created);
+
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).set({
+      ...base,
+      displayName: "Lyra Dawnweaver",
+      heroClass: "ARCANIST",
+      avatarConfig: "2,4,1,3,5,2",
+      characterCreated: true,
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      heroClass: "SHADOWBLADE",
+      avatarConfig: "5,7,2,5,3,4",
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      heroClass: "RANGER",
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      avatarConfig: "invalid_format",
+      updatedAt: new Date(Date.now() - 200),
+    })
+  );
+});
+
+test("TownPresence: owner writes & filtered inTown list succeed; unauthenticated, unfiltered list, and cross-user writes fail", async () => {
+  const ts = new Date(Date.now() - 2000);
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+
+  const alicePresence = {
+    userId: ALICE_UID,
+    displayName: "Aurelia",
+    heroClass: "VANGUARD",
+    heroLevel: 8,
+    heroPower: 420,
+    prestigeLevel: 1,
+    avatarConfig: "1,2,1,0,3,2",
+    equippedPetId: "SUNFOX_KIT",
+    posX: 0.45,
+    posY: 0.62,
+    facingRight: true,
+    emote: "Hail, Striders!",
+    inTown: true,
+    updatedAt: ts,
+  };
+
+  // Unauthenticated cannot read or write town presence
+  await assertFails(unauthDb.collection("town_presence").where("inTown", "==", true).get());
+  await assertFails(unauthDb.collection("town_presence").doc(ALICE_UID).set(alicePresence));
+
+  // Owner writes valid town presence
+  await assertSucceeds(aliceDb.collection("town_presence").doc(ALICE_UID).set(alicePresence));
+
+  // Another signed-in player can list players with inTown == true
+  await assertSucceeds(bobDb.collection("town_presence").where("inTown", "==", true).limit(25).get());
+
+  // Unfiltered list fails
+  await assertFails(bobDb.collection("town_presence").get());
+
+  // Cross-user write/delete rejected
+  await assertFails(
+    bobDb.collection("town_presence").doc(ALICE_UID).set({
+      ...alicePresence,
+      emote: "Hijacked",
+    })
+  );
+  await assertFails(bobDb.collection("town_presence").doc(ALICE_UID).delete());
+
+  // Out-of-bounds coordinates rejected
+  await assertFails(
+    aliceDb.collection("town_presence").doc(ALICE_UID).set({
+      ...alicePresence,
+      posX: 1.5,
+    })
+  );
+
+  // Owner can leave town cleanly
+  await assertSucceeds(aliceDb.collection("town_presence").doc(ALICE_UID).delete());
+});
+
+test("MultiplayerChat: signed-in global chat create/list/owner-delete succeed; unauth, unfiltered, update & cross-user delete fail", async () => {
+  const ts = new Date(Date.now() - 1000);
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+
+  const msg = {
+    userId: ALICE_UID,
+    displayName: "Aurelia",
+    heroClass: "VANGUARD",
+    heroLevel: 10,
+    avatarConfig: "1,2,1,0,3,2",
+    equippedPetId: "SUNFOX_KIT",
+    message: "Anyone up for a friendly duel?",
+    channel: "GLOBAL",
+    createdAt: ts,
+  };
+
+  await assertFails(unauthDb.collection("multiplayer_chat").where("channel", "==", "GLOBAL").get());
+  await assertFails(unauthDb.collection("multiplayer_chat").doc("msg_1").set(msg));
+
+  await assertSucceeds(aliceDb.collection("multiplayer_chat").doc("msg_1").set(msg));
+  await assertSucceeds(bobDb.collection("multiplayer_chat").where("channel", "==", "GLOBAL").limit(60).get());
+  await assertFails(bobDb.collection("multiplayer_chat").get());
+
+  // Messages are immutable & cannot be deleted by other users
+  await assertFails(aliceDb.collection("multiplayer_chat").doc("msg_1").update({ message: "Edited" }));
+  await assertFails(bobDb.collection("multiplayer_chat").doc("msg_1").delete());
+
+  // Sender can delete own message
+  await assertSucceeds(aliceDb.collection("multiplayer_chat").doc("msg_1").delete());
+});
+
+test("MultiplayerDuels: participant-scoped challenge, accept, turn play, completion & outsider isolation", async () => {
+  const ts = new Date(Date.now() - 2000);
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const charlieDb = testEnv.authenticatedContext("charlie_outsider_03").firestore();
+
+  const duel = {
+    participantUids: [ALICE_UID, BOB_UID],
+    challengerUid: ALICE_UID,
+    challengerName: "Aurelia",
+    challengerClass: "VANGUARD",
+    challengerLevel: 10,
+    challengerPower: 420,
+    challengerAvatar: "1,2,1,0,3,2",
+    challengerPetId: "SUNFOX_KIT",
+    challengerHp: 300,
+    challengerMaxHp: 300,
+    challengerGuard: false,
+    opponentUid: BOB_UID,
+    opponentName: "Kael",
+    opponentClass: "RANGER",
+    opponentLevel: 9,
+    opponentPower: 390,
+    opponentAvatar: "0,1,2,3,1,0",
+    opponentPetId: "DUNE_FALCON",
+    opponentHp: 280,
+    opponentMaxHp: 280,
+    opponentGuard: false,
+    status: "PENDING",
+    turnUid: ALICE_UID,
+    turnNumber: 1,
+    winnerUid: "",
+    lastActionLog: "Aurelia challenged Kael to a Solar Duel!",
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  // Challenger creates PENDING duel
+  await assertSucceeds(aliceDb.collection("multiplayer_duels").doc("duel_1").set(duel));
+
+  // Participants query via array-contains; outsider cannot read or list
+  await assertSucceeds(bobDb.collection("multiplayer_duels").where("participantUids", "array-contains", BOB_UID).get());
+  await assertFails(charlieDb.collection("multiplayer_duels").doc("duel_1").get());
+  await assertFails(bobDb.collection("multiplayer_duels").get());
+
+  // Challenger cannot self-accept
+  await assertFails(
+    aliceDb.collection("multiplayer_duels").doc("duel_1").update({
+      status: "ACTIVE",
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Opponent accepts duel
+  await assertSucceeds(
+    bobDb.collection("multiplayer_duels").doc("duel_1").update({
+      status: "ACTIVE",
+      lastActionLog: "Kael accepted! Aurelia moves first.",
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Active turn player (Alice) strikes and passes turn to Bob
+  await assertSucceeds(
+    aliceDb.collection("multiplayer_duels").doc("duel_1").update({
+      opponentHp: 210,
+      turnUid: BOB_UID,
+      turnNumber: 2,
+      lastActionLog: "Aurelia used Solar Strike for 70 DMG!",
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  // Finish duel and delete
+  await assertSucceeds(
+    bobDb.collection("multiplayer_duels").doc("duel_1").update({
+      challengerHp: 0,
+      status: "COMPLETED",
+      winnerUid: BOB_UID,
+      lastActionLog: "Kael won the duel!",
+      updatedAt: new Date(Date.now() - 200),
+    })
+  );
+  await assertSucceeds(aliceDb.collection("multiplayer_duels").doc("duel_1").delete());
+});
+
+test("MultiplayerPetPlaydates: participant-scoped invite, accept, live play actions & outsider isolation", async () => {
+  const ts = new Date(Date.now() - 2000);
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const charlieDb = testEnv.authenticatedContext("charlie_outsider_03").firestore();
+
+  const playdate = {
+    participantUids: [ALICE_UID, BOB_UID],
+    hostUid: ALICE_UID,
+    hostName: "Aurelia",
+    hostPetType: "SUNFOX_KIT",
+    hostPetLevel: 5,
+    guestUid: BOB_UID,
+    guestName: "Kael",
+    guestPetType: "DUNE_FALCON",
+    guestPetLevel: 4,
+    status: "PENDING",
+    activity: "CHASE",
+    playCount: 0,
+    happinessBonus: 0,
+    lastPlayLog: "Sunfox Kit invited Dune Falcon to play!",
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  await assertSucceeds(aliceDb.collection("multiplayer_pet_playdates").doc("play_1").set(playdate));
+  await assertSucceeds(bobDb.collection("multiplayer_pet_playdates").where("participantUids", "array-contains", BOB_UID).get());
+  await assertFails(charlieDb.collection("multiplayer_pet_playdates").doc("play_1").get());
+
+  // Guest accepts playdate
+  await assertSucceeds(
+    bobDb.collection("multiplayer_pet_playdates").doc("play_1").update({
+      status: "PLAYING",
+      activity: "FETCH",
+      playCount: 1,
+      happinessBonus: 15,
+      lastPlayLog: "Sunfox Kit & Dune Falcon played Astral Orb Fetch!",
+      updatedAt: new Date(Date.now() - 800),
+    })
+  );
+
+  // Host triggers another play activity & then finishes
+  await assertSucceeds(
+    aliceDb.collection("multiplayer_pet_playdates").doc("play_1").update({
+      activity: "SPAR",
+      playCount: 2,
+      happinessBonus: 30,
+      lastPlayLog: "Friendly Paw Spar! Both companions are beaming!",
+      updatedAt: new Date(Date.now() - 400),
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("multiplayer_pet_playdates").doc("play_1").update({
+      status: "FINISHED",
+      updatedAt: new Date(Date.now() - 200),
+    })
+  );
+  await assertSucceeds(bobDb.collection("multiplayer_pet_playdates").doc("play_1").delete());
+});
+

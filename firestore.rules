@@ -25,7 +25,11 @@ service cloud.firestore {
     }
 
     function isValidHeroClass(cls) {
-      return cls is string && cls in ['VANGUARD', 'STRIDER', 'SUNBLADE'];
+      return cls is string && cls in ['VANGUARD', 'ARCANIST', 'RANGER', 'SHADOWBLADE', 'STRIDER', 'SUNBLADE'];
+    }
+
+    function isValidAvatarConfig(cfg) {
+      return cfg is string && cfg.matches('^[0-9](,[0-9]){5}$');
     }
 
     function isValidSlot(slot) {
@@ -80,7 +84,7 @@ service cloud.firestore {
     function isValidHeroProfile(d) {
       return d.userId == request.auth.uid &&
              d.displayName is string && d.displayName.size() >= 1 && d.displayName.size() <= 50 &&
-             d.heroClass in ['VANGUARD', 'STRIDER', 'SUNBLADE'] &&
+             isValidHeroClass(d.heroClass) &&
              d.level is int && d.level >= 1 && d.level <= 999 &&
              d.xp is int && d.xp >= 0 &&
              d.xpToNextLevel is int && d.xpToNextLevel >= 1 &&
@@ -121,7 +125,9 @@ service cloud.firestore {
              d.get('dailyExpeditionsDone', 0) >= 0 &&
              d.get('dailyChestsOpened', 0) >= 0 &&
              d.get('claimedQuestIds', []).size() <= 80 &&
-             d.get('chestsOpenedTotal', 0) >= 0;
+             d.get('chestsOpenedTotal', 0) >= 0 &&
+             (!('avatarConfig' in d) || isValidAvatarConfig(d.avatarConfig)) &&
+             (!('characterCreated' in d) || d.characterCreated is bool);
     }
 
     function isValidInventoryItem(data) {
@@ -210,6 +216,7 @@ service cloud.firestore {
                          'currentSpireFloor', 'highestSpireFloor', 'prestigeLevel', 'skillRanks',
                          'dailyQuestDateKey', 'dailyBattlesWon', 'dailyExpeditionsDone',
                          'dailyChestsOpened', 'claimedQuestIds', 'chestsOpenedTotal',
+                         'avatarConfig', 'characterCreated',
                          'createdAt', 'updatedAt'
                        ]) &&
                        isValidHeroProfile(request.resource.data);
@@ -230,6 +237,7 @@ service cloud.firestore {
                          'currentSpireFloor', 'highestSpireFloor', 'prestigeLevel', 'skillRanks',
                          'dailyQuestDateKey', 'dailyBattlesWon', 'dailyExpeditionsDone',
                          'dailyChestsOpened', 'claimedQuestIds', 'chestsOpenedTotal',
+                         'avatarConfig', 'characterCreated',
                          'updatedAt'
                        ]) &&
                        isValidHeroProfile(request.resource.data);
@@ -368,6 +376,260 @@ service cloud.firestore {
                        ]);
 
       allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    // --- Collection: /town_presence/{userId} (Real-Time Multiplayer Sunhaven Plaza & Lobby) ---
+    function isValidTownPresence(d) {
+      return isValidId(d.userId) &&
+             d.userId == request.auth.uid &&
+             d.displayName is string && d.displayName.size() >= 1 && d.displayName.size() <= 50 &&
+             isValidHeroClass(d.heroClass) &&
+             intBound(d.heroLevel, 1, 999) &&
+             intBound(d.heroPower, 1, 10000000) &&
+             intBound(d.prestigeLevel, 0, 99) &&
+             isValidAvatarConfig(d.avatarConfig) &&
+             d.equippedPetId in ['', 'SUNFOX_KIT', 'AEGIS_SCARAB', 'DUNE_FALCON', 'CINDER_LYNX', 'OASIS_TORTOISE', 'SOLAR_PHOENIX'] &&
+             optInt(d, 'equippedPetLevel', 1, 50) &&
+             (d.posX is number) && d.posX >= 0.0 && d.posX <= 1.0 &&
+             (d.posY is number) && d.posY >= 0.0 && d.posY <= 1.0 &&
+             d.facingRight is bool &&
+             d.emote is string && d.emote.size() <= 32 &&
+             d.inTown is bool &&
+             d.updatedAt is timestamp && d.updatedAt <= request.time;
+    }
+
+    match /town_presence/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn() && resource.data.inTown == true;
+
+      allow create, update: if isSignedIn() &&
+                               isValidId(userId) &&
+                               request.auth.uid == userId &&
+                               incoming().keys().hasAll([
+                                 'userId', 'displayName', 'heroClass', 'heroLevel', 'heroPower',
+                                 'prestigeLevel', 'avatarConfig', 'equippedPetId', 'posX', 'posY',
+                                 'facingRight', 'emote', 'inTown', 'updatedAt'
+                               ]) &&
+                               incoming().keys().hasOnly([
+                                 'userId', 'displayName', 'heroClass', 'heroLevel', 'heroPower',
+                                 'prestigeLevel', 'avatarConfig', 'equippedPetId', 'equippedPetLevel',
+                                 'posX', 'posY', 'facingRight', 'emote', 'inTown', 'updatedAt'
+                               ]) &&
+                               isValidTownPresence(incoming());
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    // --- Collection: /multiplayer_chat/{messageId} (Real-Time Global Player Chat) ---
+    function isValidChatMessage(d) {
+      return isValidId(d.userId) &&
+             d.userId == request.auth.uid &&
+             d.displayName is string && d.displayName.size() >= 1 && d.displayName.size() <= 50 &&
+             isValidHeroClass(d.heroClass) &&
+             intBound(d.heroLevel, 1, 999) &&
+             isValidAvatarConfig(d.avatarConfig) &&
+             d.equippedPetId in ['', 'SUNFOX_KIT', 'AEGIS_SCARAB', 'DUNE_FALCON', 'CINDER_LYNX', 'OASIS_TORTOISE', 'SOLAR_PHOENIX'] &&
+             d.message is string && d.message.size() >= 1 && d.message.size() <= 240 &&
+             d.channel == 'GLOBAL' &&
+             d.createdAt is timestamp && d.createdAt <= request.time;
+    }
+
+    match /multiplayer_chat/{messageId} {
+      allow get: if isSignedIn() && isValidId(messageId);
+      allow list: if isSignedIn() && resource.data.channel == 'GLOBAL';
+
+      allow create: if isSignedIn() &&
+                       isValidId(messageId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'displayName', 'heroClass', 'heroLevel',
+                         'avatarConfig', 'equippedPetId', 'message', 'channel', 'createdAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'displayName', 'heroClass', 'heroLevel',
+                         'avatarConfig', 'equippedPetId', 'message', 'channel', 'createdAt'
+                       ]) &&
+                       isValidChatMessage(incoming());
+
+      allow update: if false;
+
+      allow delete: if isSignedIn() && isValidId(messageId) && existing().userId == request.auth.uid;
+    }
+
+    // --- Collection: /multiplayer_duels/{duelId} (Real-Time Turn-Based PvP Duels) ---
+    function isValidDuelStatus(s) {
+      return s is string && s in ['PENDING', 'ACTIVE', 'COMPLETED', 'DECLINED'];
+    }
+
+    function isValidMultiplayerDuel(d) {
+      return d.participantUids is list &&
+             d.participantUids.size() == 2 &&
+             isValidId(d.challengerUid) &&
+             isValidId(d.opponentUid) &&
+             d.challengerUid != d.opponentUid &&
+             d.participantUids[0] == d.challengerUid &&
+             d.participantUids[1] == d.opponentUid &&
+             d.challengerName is string && d.challengerName.size() >= 1 && d.challengerName.size() <= 50 &&
+             isValidHeroClass(d.challengerClass) &&
+             intBound(d.challengerLevel, 1, 999) &&
+             intBound(d.challengerPower, 1, 10000000) &&
+             isValidAvatarConfig(d.challengerAvatar) &&
+             d.challengerPetId in ['', 'SUNFOX_KIT', 'AEGIS_SCARAB', 'DUNE_FALCON', 'CINDER_LYNX', 'OASIS_TORTOISE', 'SOLAR_PHOENIX'] &&
+             intBound(d.challengerHp, 0, 1000000) &&
+             intBound(d.challengerMaxHp, 1, 1000000) &&
+             d.challengerHp <= d.challengerMaxHp &&
+             d.challengerGuard is bool &&
+             d.opponentName is string && d.opponentName.size() >= 1 && d.opponentName.size() <= 50 &&
+             isValidHeroClass(d.opponentClass) &&
+             intBound(d.opponentLevel, 1, 999) &&
+             intBound(d.opponentPower, 1, 10000000) &&
+             isValidAvatarConfig(d.opponentAvatar) &&
+             d.opponentPetId in ['', 'SUNFOX_KIT', 'AEGIS_SCARAB', 'DUNE_FALCON', 'CINDER_LYNX', 'OASIS_TORTOISE', 'SOLAR_PHOENIX'] &&
+             intBound(d.opponentHp, 0, 1000000) &&
+             intBound(d.opponentMaxHp, 1, 1000000) &&
+             d.opponentHp <= d.opponentMaxHp &&
+             d.opponentGuard is bool &&
+             isValidDuelStatus(d.status) &&
+             (d.turnUid == d.challengerUid || d.turnUid == d.opponentUid) &&
+             intBound(d.turnNumber, 1, 500) &&
+             (d.winnerUid == '' || d.winnerUid == d.challengerUid || d.winnerUid == d.opponentUid) &&
+             d.lastActionLog is string && d.lastActionLog.size() <= 240 &&
+             d.createdAt is timestamp && d.createdAt <= request.time &&
+             d.updatedAt is timestamp && d.updatedAt <= request.time;
+    }
+
+    match /multiplayer_duels/{duelId} {
+      allow get: if isSignedIn() && isValidId(duelId) && request.auth.uid in resource.data.participantUids;
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participantUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(duelId) &&
+                       incoming().challengerUid == request.auth.uid &&
+                       incoming().status == 'PENDING' &&
+                       incoming().winnerUid == '' &&
+                       incoming().keys().hasAll([
+                         'participantUids', 'challengerUid', 'challengerName', 'challengerClass',
+                         'challengerLevel', 'challengerPower', 'challengerAvatar', 'challengerPetId',
+                         'challengerHp', 'challengerMaxHp', 'challengerGuard',
+                         'opponentUid', 'opponentName', 'opponentClass',
+                         'opponentLevel', 'opponentPower', 'opponentAvatar', 'opponentPetId',
+                         'opponentHp', 'opponentMaxHp', 'opponentGuard',
+                         'status', 'turnUid', 'turnNumber', 'winnerUid', 'lastActionLog',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'participantUids', 'challengerUid', 'challengerName', 'challengerClass',
+                         'challengerLevel', 'challengerPower', 'challengerAvatar', 'challengerPetId',
+                         'challengerHp', 'challengerMaxHp', 'challengerGuard',
+                         'opponentUid', 'opponentName', 'opponentClass',
+                         'opponentLevel', 'opponentPower', 'opponentAvatar', 'opponentPetId',
+                         'opponentHp', 'opponentMaxHp', 'opponentGuard',
+                         'status', 'turnUid', 'turnNumber', 'winnerUid', 'lastActionLog',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidMultiplayerDuel(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(duelId) &&
+                       request.auth.uid in existing().participantUids &&
+                       incoming().participantUids == existing().participantUids &&
+                       incoming().challengerUid == existing().challengerUid &&
+                       incoming().opponentUid == existing().opponentUid &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'challengerHp', 'challengerGuard', 'opponentHp', 'opponentGuard',
+                         'status', 'turnUid', 'turnNumber', 'winnerUid', 'lastActionLog', 'updatedAt'
+                       ]) &&
+                       isValidMultiplayerDuel(incoming()) &&
+                       (
+                         (existing().status == 'PENDING' && incoming().status == 'ACTIVE' && request.auth.uid == existing().opponentUid) ||
+                         (existing().status == 'PENDING' && incoming().status == 'DECLINED') ||
+                         (existing().status == 'ACTIVE' && incoming().status in ['ACTIVE', 'COMPLETED'] &&
+                           (request.auth.uid == existing().turnUid || incoming().status == 'COMPLETED'))
+                       );
+
+      allow delete: if isSignedIn() &&
+                       isValidId(duelId) &&
+                       request.auth.uid in existing().participantUids &&
+                       existing().status in ['COMPLETED', 'DECLINED'];
+    }
+
+    // --- Collection: /multiplayer_pet_playdates/{playdateId} (Real-Time Pet Playdates) ---
+    function isValidPlaydateStatus(s) {
+      return s is string && s in ['PENDING', 'PLAYING', 'FINISHED', 'DECLINED'];
+    }
+
+    function isValidPlayActivity(a) {
+      return a is string && a in ['CHASE', 'FETCH', 'SPAR', 'NAP'];
+    }
+
+    function isValidPetPlaydate(d) {
+      return d.participantUids is list &&
+             d.participantUids.size() == 2 &&
+             isValidId(d.hostUid) &&
+             isValidId(d.guestUid) &&
+             d.hostUid != d.guestUid &&
+             d.participantUids[0] == d.hostUid &&
+             d.participantUids[1] == d.guestUid &&
+             d.hostName is string && d.hostName.size() >= 1 && d.hostName.size() <= 50 &&
+             isValidPetType(d.hostPetType) &&
+             intBound(d.hostPetLevel, 1, 50) &&
+             d.guestName is string && d.guestName.size() >= 1 && d.guestName.size() <= 50 &&
+             isValidPetType(d.guestPetType) &&
+             intBound(d.guestPetLevel, 1, 50) &&
+             isValidPlaydateStatus(d.status) &&
+             isValidPlayActivity(d.activity) &&
+             intBound(d.playCount, 0, 50) &&
+             intBound(d.happinessBonus, 0, 100) &&
+             d.lastPlayLog is string && d.lastPlayLog.size() <= 240 &&
+             d.createdAt is timestamp && d.createdAt <= request.time &&
+             d.updatedAt is timestamp && d.updatedAt <= request.time;
+    }
+
+    match /multiplayer_pet_playdates/{playdateId} {
+      allow get: if isSignedIn() && isValidId(playdateId) && request.auth.uid in resource.data.participantUids;
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participantUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(playdateId) &&
+                       incoming().hostUid == request.auth.uid &&
+                       incoming().status == 'PENDING' &&
+                       incoming().keys().hasAll([
+                         'participantUids', 'hostUid', 'hostName', 'hostPetType', 'hostPetLevel',
+                         'guestUid', 'guestName', 'guestPetType', 'guestPetLevel',
+                         'status', 'activity', 'playCount', 'happinessBonus', 'lastPlayLog',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'participantUids', 'hostUid', 'hostName', 'hostPetType', 'hostPetLevel',
+                         'guestUid', 'guestName', 'guestPetType', 'guestPetLevel',
+                         'status', 'activity', 'playCount', 'happinessBonus', 'lastPlayLog',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidPetPlaydate(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(playdateId) &&
+                       request.auth.uid in existing().participantUids &&
+                       incoming().participantUids == existing().participantUids &&
+                       incoming().hostUid == existing().hostUid &&
+                       incoming().guestUid == existing().guestUid &&
+                       incoming().hostPetType == existing().hostPetType &&
+                       incoming().guestPetType == existing().guestPetType &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'status', 'activity', 'playCount', 'happinessBonus', 'lastPlayLog', 'updatedAt'
+                       ]) &&
+                       isValidPetPlaydate(incoming()) &&
+                       (
+                         (existing().status == 'PENDING' && incoming().status == 'PLAYING' && request.auth.uid == existing().guestUid) ||
+                         (existing().status == 'PENDING' && incoming().status == 'DECLINED') ||
+                         (existing().status == 'PLAYING' && incoming().status in ['PLAYING', 'FINISHED'])
+                       );
+
+      allow delete: if isSignedIn() &&
+                       isValidId(playdateId) &&
+                       request.auth.uid in existing().participantUids &&
+                       existing().status in ['FINISHED', 'DECLINED'];
     }
   }
 }

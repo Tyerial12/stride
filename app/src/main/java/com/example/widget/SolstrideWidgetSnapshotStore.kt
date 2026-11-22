@@ -58,8 +58,8 @@ data class WidgetSnapshotState(
     val defense: Int = 20,
     val critChancePct: Int = 8,
     val heroPower: Int = 180,
-    val solCoins: Long = 0L,
-    val sunshards: Long = 75L,
+    val solCoins: Long = 20L,
+    val sunshards: Long = 0L,
     val realmNumber: Long = 1L,
     val realmStage: Long = 1L,
     val realmName: String = "Sunlit Dunes",
@@ -106,9 +106,9 @@ data class WidgetSnapshotState(
     val stepsToNextStamina: Int = 250,
     val isWatchConnected: Boolean = false,
     val stepSourceLabel: String = "Phone Live",
-    val sunsteelOre: Long = 25L,
-    val aetherHerbs: Long = 18L,
-    val elementalEssence: Long = 12L,
+    val sunsteelOre: Long = 0L,
+    val aetherHerbs: Long = 0L,
+    val elementalEssence: Long = 0L,
     val hasActiveExpedition: Boolean = false,
     val expeditionEndMs: Long = 0L,
     val expeditionDurationMin: Long = 0L,
@@ -345,7 +345,7 @@ object SolstrideWidgetSnapshotStore {
     fun read(context: Context): WidgetSnapshotState {
         val p = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val ledger = readPetLedger(context)
-        val baseCoins = p.getLong("solCoins", 0L)
+        val baseCoins = p.getLong("solCoins", 20L)
         val basePetLevel = p.getInt("petLevel", 1)
         val basePetXp = p.getLong("petXp", 0L)
         val previewProg = WildPetBattleEngine.computePreviewProgression(
@@ -373,7 +373,7 @@ object SolstrideWidgetSnapshotStore {
             critChancePct = p.getInt("critChancePct", 8),
             heroPower = p.getInt("heroPower", 180),
             solCoins = (baseCoins - ledger.pendingCoinsSpent).coerceAtLeast(0L),
-            sunshards = p.getLong("sunshards", 75L),
+            sunshards = p.getLong("sunshards", 0L),
             realmNumber = p.getLong("realmNumber", 1L),
             realmStage = p.getLong("realmStage", 1L),
             realmName = p.getString("realmName", "Sunlit Dunes") ?: "Sunlit Dunes",
@@ -422,9 +422,9 @@ object SolstrideWidgetSnapshotStore {
             stepsToNextStamina = computedStepsToNextStamina,
             isWatchConnected = p.getBoolean("isWatchConnected", false),
             stepSourceLabel = p.getString("stepSourceLabel", "Phone Live") ?: "Phone Live",
-            sunsteelOre = p.getLong("sunsteelOre", 25L) + ledger.pendingOreWon,
-            aetherHerbs = p.getLong("aetherHerbs", 18L),
-            elementalEssence = p.getLong("elementalEssence", 12L) + ledger.pendingEssenceWon,
+            sunsteelOre = p.getLong("sunsteelOre", 0L) + ledger.pendingOreWon,
+            aetherHerbs = p.getLong("aetherHerbs", 0L),
+            elementalEssence = p.getLong("elementalEssence", 0L) + ledger.pendingEssenceWon,
             hasActiveExpedition = p.getBoolean("hasActiveExpedition", false),
             expeditionEndMs = p.getLong("expeditionEndMs", 0L),
             expeditionDurationMin = p.getLong("expeditionDurationMin", 0L),
@@ -523,14 +523,14 @@ object SolstrideWidgetSnapshotStore {
     }
 
     /**
-     * Converts walked steps (+1 stamina / 250 steps, +1 free treat / 500 steps) and elapsed time
-     * (+1 stamina / 30 min) into Pet Widget Wild Battle Stamina & Step Treats.
+     * Converts walked steps (+1 stamina / 250 steps) and elapsed time
+     * (+1 stamina / 30 min) into Pet Widget Wild Battle Stamina.
+     * Feeding pets always requires spending Sol Coins.
      */
     fun rechargeWildStaminaAndTreats(context: Context, totalOrTodaySteps: Long) {
         val ledger = readPetLedger(context)
         val now = System.currentTimeMillis()
         var stamina = ledger.petWildStamina
-        var treats = ledger.stepTreatsAvailable
         var nextStepBase = ledger.lastStaminaStepCount
 
         if (totalOrTodaySteps < nextStepBase) {
@@ -540,9 +540,7 @@ object SolstrideWidgetSnapshotStore {
         val stepDiff = (totalOrTodaySteps - nextStepBase).coerceAtLeast(0L)
         if (stepDiff >= WildPetBattleEngine.STEPS_PER_STAMINA) {
             val staminaGain = (stepDiff / WildPetBattleEngine.STEPS_PER_STAMINA).toInt()
-            val treatGain = (stepDiff / WildPetBattleEngine.STEPS_PER_FREE_TREAT).toInt()
             stamina = (stamina + staminaGain).coerceAtMost(WildPetBattleEngine.MAX_WILD_STAMINA)
-            treats = (treats + treatGain).coerceAtMost(20)
             nextStepBase += staminaGain * WildPetBattleEngine.STEPS_PER_STAMINA
         }
 
@@ -556,14 +554,14 @@ object SolstrideWidgetSnapshotStore {
             ledger.lastPassiveRechargeMs
         }
 
-        if (stamina != ledger.petWildStamina || treats != ledger.stepTreatsAvailable ||
+        if (stamina != ledger.petWildStamina || ledger.stepTreatsAvailable != 0 ||
             nextStepBase != ledger.lastStaminaStepCount || nextPassiveMs != ledger.lastPassiveRechargeMs
         ) {
             savePetLedger(
                 context,
                 ledger.copy(
                     petWildStamina = stamina,
-                    stepTreatsAvailable = treats,
+                    stepTreatsAvailable = 0,
                     lastStaminaStepCount = nextStepBase,
                     lastPassiveRechargeMs = nextPassiveMs
                 )
@@ -573,7 +571,7 @@ object SolstrideWidgetSnapshotStore {
 
     /**
      * Direct Home Screen Widget FEED action — ONLY works while Solstride app is closed!
-     * Uses 1 Step Treat first (if available) or 5 Sol Coins to boost Mood & award Pet XP.
+     * Always spends 5 Sol Coins to boost Mood & award Pet XP.
      */
     fun performWidgetFeedAction(context: Context): Boolean {
         if (isAppForegroundLocked(context)) return false
@@ -581,12 +579,11 @@ object SolstrideWidgetSnapshotStore {
         if (!snapshot.hasPet) return false
 
         val ledger = readPetLedger(context)
-        val useStepTreat = ledger.stepTreatsAvailable > 0
-        if (!useStepTreat && snapshot.solCoins < WildPetBattleEngine.FEED_SOL_COIN_COST) {
+        if (snapshot.solCoins < WildPetBattleEngine.FEED_SOL_COIN_COST) {
             savePetLedger(
                 context,
                 ledger.copy(
-                    lastWildBattleSummary = "Need 5 Sol Coins or 500 steps (Step Treat) to feed ${snapshot.petName}!"
+                    lastWildBattleSummary = "Need ${WildPetBattleEngine.FEED_SOL_COIN_COST} Sol Coins to feed ${snapshot.petName}!"
                 )
             )
             SolstrideWidgetUpdater.updateAllWidgets(context)
@@ -595,9 +592,7 @@ object SolstrideWidgetSnapshotStore {
 
         val newMood = (ledger.petMoodPct + WildPetBattleEngine.FEED_MOOD_GAIN).coerceAtMost(100)
         val newPendingXp = ledger.pendingPetXp + WildPetBattleEngine.FEED_XP_GAIN
-        val newPendingCoins = if (useStepTreat) ledger.pendingCoinsSpent else ledger.pendingCoinsSpent + WildPetBattleEngine.FEED_SOL_COIN_COST
-        val newTreats = if (useStepTreat) (ledger.stepTreatsAvailable - 1).coerceAtLeast(0) else ledger.stepTreatsAvailable
-        val costLabel = if (useStepTreat) "1 Step Treat" else "${WildPetBattleEngine.FEED_SOL_COIN_COST} Coins"
+        val newPendingCoins = ledger.pendingCoinsSpent + WildPetBattleEngine.FEED_SOL_COIN_COST
 
         val basePrefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val prevLevel = snapshot.petLevel
@@ -607,7 +602,7 @@ object SolstrideWidgetSnapshotStore {
             addedXp = newPendingXp
         )
         val lvlUpTag = if (previewAfter.level > prevLevel) " ★ LV.${previewAfter.level}!" else ""
-        val summary = "🍖 Fed ${snapshot.petName} ($costLabel)! +${WildPetBattleEngine.FEED_XP_GAIN} XP$lvlUpTag • Mood $newMood%"
+        val summary = "🍖 Fed ${snapshot.petName} (-${WildPetBattleEngine.FEED_SOL_COIN_COST} Sol Coins)! +${WildPetBattleEngine.FEED_XP_GAIN} XP$lvlUpTag • Mood $newMood%"
 
         savePetLedger(
             context,
@@ -617,7 +612,7 @@ object SolstrideWidgetSnapshotStore {
                 pendingCoinsSpent = newPendingCoins,
                 pendingFeeds = ledger.pendingFeeds + 1,
                 petMoodPct = newMood,
-                stepTreatsAvailable = newTreats,
+                stepTreatsAvailable = 0,
                 lastWildBattleSummary = summary
             )
         )

@@ -79,11 +79,6 @@ import com.example.ui.theme.LocalSolstrideColors
 import com.example.widget.WidgetSnapshotState
 import java.util.Locale
 
-private enum class PetsSubSection(val label: String) {
-    COMPANIONS("Companions (6)"),
-    PET_SHOP("Pet Gear & Widget")
-}
-
 @Composable
 fun PetsScreen(
     profile: HeroProfile,
@@ -92,15 +87,12 @@ fun PetsScreen(
     expeditionLocked: Boolean,
     expeditionRemainingMs: Long,
     onJumpToExpedition: () -> Unit,
-    onAdoptPet: (PetType) -> Unit,
     onEquipPet: (PetType) -> Unit,
-    @Suppress("UNUSED_PARAMETER") onBuyPetFood: (PetFoodSpec) -> Unit,
-    onBuyPetGear: (PetGearSpec) -> Unit,
+    onVisitTownPetStore: () -> Unit = {},
     widgetSnapshot: WidgetSnapshotState = WidgetSnapshotState(),
     onPinPetWidget: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var activeSection by remember { mutableStateOf(PetsSubSection.COMPANIONS) }
     var selectedRarityFilter by remember { mutableStateOf<PetRarity?>(null) }
     val ext = LocalSolstrideColors.current
     val ownedMap = remember(ownedPets) { ownedPets.associateBy { it.resolvedType() } }
@@ -196,11 +188,71 @@ fun PetsScreen(
         item {
             EquippedCompanionCard(
                 equippedPet = equippedPet,
-                onSwitchToShop = { activeSection = PetsSubSection.PET_SHOP }
+                onVisitTownPetStore = onVisitTownPetStore
             )
         }
 
-        // Exclusive Home Screen Pet Arena Widget Card (Only way to level up pets!)
+        // Rarity Tier Filter Strip
+        item {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                item {
+                    FilterChip(
+                        selected = selectedRarityFilter == null,
+                        onClick = { selectedRarityFilter = null },
+                        label = { Text("All (${PetType.entries.size})") },
+                        modifier = Modifier
+                            .height(48.dp)
+                            .testTag("pet_rarity_filter_all")
+                    )
+                }
+                items(PetRarity.entries) { rarity ->
+                    val count = PetType.entries.count { it.rarity == rarity }
+                    val rarityColor = petRarityColorFor(rarity)
+                    FilterChip(
+                        selected = selectedRarityFilter == rarity,
+                        onClick = {
+                            selectedRarityFilter = if (selectedRarityFilter == rarity) null else rarity
+                        },
+                        label = {
+                            Text(
+                                text = "${rarity.label} ($count)",
+                                color = if (selectedRarityFilter == rarity) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                } else {
+                                    rarityColor
+                                },
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        },
+                        modifier = Modifier
+                            .height(48.dp)
+                            .testTag("pet_rarity_filter_${rarity.name.lowercase(Locale.US)}")
+                    )
+                }
+            }
+        }
+
+        items(filteredPets, key = { it.name }) { petType ->
+            val owned = ownedMap[petType]
+            val isEquipped = equippedPet?.resolvedType() == petType
+            val unlock = PetCatalog.evaluateUnlock(petType, profile)
+            CompanionRosterCard(
+                petType = petType,
+                ownedPet = owned,
+                isEquipped = isEquipped,
+                unlockUnlocked = unlock.unlocked,
+                unlockLabel = unlock.progressLabel,
+                unlockFraction = unlock.progressFraction,
+                expeditionLocked = expeditionLocked,
+                onEquip = { onEquipPet(petType) },
+                onVisitTownPetStore = onVisitTownPetStore
+            )
+        }
+
+        // Home Screen Pet Arena Widget Card
         item {
             PetWidgetExclusiveArenaCard(
                 equippedPet = equippedPet,
@@ -208,199 +260,13 @@ fun PetsScreen(
                 onPinPetWidget = onPinPetWidget
             )
         }
-
-        // Segmented Sub-View Switcher (Companions Roster vs Pet Shop)
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                PetsSubSection.entries.forEach { section ->
-                    FilterChip(
-                        selected = activeSection == section,
-                        onClick = { activeSection = section },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = if (section == PetsSubSection.COMPANIONS) Icons.Filled.Pets else Icons.Filled.Storefront,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        },
-                        label = { Text(section.label, style = MaterialTheme.typography.titleSmall) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .testTag("pets_section_${section.name.lowercase(Locale.US)}")
-                    )
-                }
-            }
-        }
-
-        if (activeSection == PetsSubSection.COMPANIONS) {
-            // Rarity Tier Filter Strip
-            item {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    item {
-                        FilterChip(
-                            selected = selectedRarityFilter == null,
-                            onClick = { selectedRarityFilter = null },
-                            label = { Text("All (${PetType.entries.size})") },
-                            modifier = Modifier
-                                .height(48.dp)
-                                .testTag("pet_rarity_filter_all")
-                        )
-                    }
-                    items(PetRarity.entries) { rarity ->
-                        val count = PetType.entries.count { it.rarity == rarity }
-                        val rarityColor = petRarityColorFor(rarity)
-                        FilterChip(
-                            selected = selectedRarityFilter == rarity,
-                            onClick = {
-                                selectedRarityFilter = if (selectedRarityFilter == rarity) null else rarity
-                            },
-                            label = {
-                                Text(
-                                    text = "${rarity.label} ($count)",
-                                    color = if (selectedRarityFilter == rarity) {
-                                        MaterialTheme.colorScheme.onSecondaryContainer
-                                    } else {
-                                        rarityColor
-                                    },
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            },
-                            modifier = Modifier
-                                .height(48.dp)
-                                .testTag("pet_rarity_filter_${rarity.name.lowercase(Locale.US)}")
-                        )
-                    }
-                }
-            }
-
-            items(filteredPets, key = { it.name }) { petType ->
-                val owned = ownedMap[petType]
-                val isEquipped = equippedPet?.resolvedType() == petType
-                val unlock = PetCatalog.evaluateUnlock(petType, profile)
-                CompanionRosterCard(
-                    petType = petType,
-                    ownedPet = owned,
-                    isEquipped = isEquipped,
-                    unlockUnlocked = unlock.unlocked,
-                    unlockLabel = unlock.progressLabel,
-                    unlockFraction = unlock.progressFraction,
-                    solCoins = profile.solCoins,
-                    expeditionLocked = expeditionLocked,
-                    onAdopt = { onAdoptPet(petType) },
-                    onEquip = { onEquipPet(petType) }
-                )
-            }
-        } else {
-            // Pet Shop for Currently Equipped Pet
-            item {
-                SolstrideCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Storefront,
-                            contentDescription = "Pet Shop target companion",
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        Column {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = if (equippedPet != null) {
-                                        "Outfitting: ${equippedPet.resolvedType().displayName} (Lv.${equippedPet.level})"
-                                    } else {
-                                        "No Companion Equipped"
-                                    },
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
-                                if (equippedPet != null) {
-                                    PetRarityBadge(
-                                        rarity = equippedPet.resolvedType().rarity,
-                                        compact = true,
-                                        modifier = Modifier.testTag("pet_shop_equipped_rarity_badge")
-                                    )
-                                }
-                            }
-                            Text(
-                                text = if (equippedPet != null) {
-                                    "Weapons & Armor equip directly to your pet. Level up your pet exclusively via the Home Screen Pet Arena Widget while Solstride is closed."
-                                } else {
-                                    "Adopt and equip a companion first to buy Pet Weapons, Pet Armor, and train on the Home Screen Pet Arena Widget."
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Section: Widget-Exclusive Pet Training Reminder
-            item {
-                ShopSectionHeader(
-                    icon = Icons.Filled.Widgets,
-                    title = "Pet Leveling (Home Screen Widget Exclusive)",
-                    subtitle = "Close Solstride to unlock the Pet Arena Widget: Feed with Sol Coins / Step Treats & Fight Wild Pets for exclusive Pet XP!"
-                )
-            }
-
-            // Section: Pet Weapons
-            item {
-                ShopSectionHeader(
-                    icon = Icons.Filled.Gavel,
-                    title = "Pet Weapons (Equipped Pet Slot)",
-                    subtitle = "Equips onto your active companion to raise Hero Attack power."
-                )
-            }
-            items(PetCatalog.weaponShop, key = { it.id }) { weapon ->
-                val isAlreadyEquipped = equippedPet?.equippedWeaponId == weapon.id
-                PetGearShopCard(
-                    gear = weapon,
-                    alreadyEquipped = isAlreadyEquipped,
-                    canBuy = !expeditionLocked && equippedPet != null && !isAlreadyEquipped && profile.solCoins >= weapon.coinCost,
-                    onBuy = { onBuyPetGear(weapon) }
-                )
-            }
-
-            // Section: Pet Armor
-            item {
-                ShopSectionHeader(
-                    icon = Icons.Filled.Shield,
-                    title = "Pet Armor (Equipped Pet Slot)",
-                    subtitle = "Equips onto your active companion to raise Hero Defense & Max HP."
-                )
-            }
-            items(PetCatalog.armorShop, key = { it.id }) { armor ->
-                val isAlreadyEquipped = equippedPet?.equippedArmorId == armor.id
-                PetGearShopCard(
-                    gear = armor,
-                    alreadyEquipped = isAlreadyEquipped,
-                    canBuy = !expeditionLocked && equippedPet != null && !isAlreadyEquipped && profile.solCoins >= armor.coinCost,
-                    onBuy = { onBuyPetGear(armor) }
-                )
-            }
-        }
     }
 }
 
 @Composable
 private fun EquippedCompanionCard(
     equippedPet: OwnedPet?,
-    onSwitchToShop: () -> Unit
+    onVisitTownPetStore: () -> Unit
 ) {
     val ext = LocalSolstrideColors.current
     SolstrideCard(
@@ -551,7 +417,7 @@ private fun EquippedCompanionCard(
 
         Spacer(modifier = Modifier.height(10.dp))
         OutlinedButton(
-            onClick = onSwitchToShop,
+            onClick = onVisitTownPetStore,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
@@ -560,7 +426,7 @@ private fun EquippedCompanionCard(
         ) {
             Icon(Icons.Filled.Storefront, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text("Buy Pet Weapons & Armor")
+            Text("Visit Pip's Pet Store in Town")
         }
     }
 }
@@ -591,18 +457,18 @@ private fun PetWidgetExclusiveArenaCard(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Widgets,
-                    contentDescription = "Pet Arena Widget Exclusive",
+                    contentDescription = "Pet Arena Widget",
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(24.dp)
                 )
                 Column {
                     Text(
-                        text = "Pet Arena Home Widget (Only Way to Level)",
+                        text = "Pet Arena Home Widget",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Feed & Fight Wild Pets on your Home Screen when Solstride is closed",
+                        text = "Feed with Sol Coins & fight Wild Pets right from your Home Screen",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -680,9 +546,9 @@ private fun PetWidgetExclusiveArenaCard(
                 border = BorderStroke(1.dp, ext.borderSubtle)
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
-                    Text("STEP TREATS", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("FEED COST", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        text = "🍖 ${widgetSnapshot.petStepTreats}",
+                        text = "🪙 5 Coins",
                         style = MaterialTheme.typography.titleSmall,
                         fontFamily = JetBrainsMonoFontFamily,
                         fontWeight = FontWeight.Bold,
@@ -748,10 +614,9 @@ private fun CompanionRosterCard(
     unlockUnlocked: Boolean,
     unlockLabel: String,
     unlockFraction: Float,
-    solCoins: Long,
     expeditionLocked: Boolean,
-    onAdopt: () -> Unit,
-    onEquip: () -> Unit
+    onEquip: () -> Unit,
+    onVisitTownPetStore: () -> Unit
 ) {
     val ext = LocalSolstrideColors.current
     val activeBonusText = if (ownedPet != null) {
@@ -885,28 +750,22 @@ private fun CompanionRosterCard(
                 }
             }
             unlockUnlocked -> {
-                Button(
-                    onClick = onAdopt,
-                    enabled = !expeditionLocked && solCoins >= petType.coinCost,
+                OutlinedButton(
+                    onClick = onVisitTownPetStore,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
-                        .testTag("adopt_pet_${petType.name.lowercase(Locale.US)}")
+                        .testTag("visit_town_adopt_${petType.name.lowercase(Locale.US)}"),
+                    border = BorderStroke(1.5.dp, ext.borderStrong)
                 ) {
-                    Icon(Icons.Filled.MonetizationOn, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Filled.Storefront, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        if (solCoins >= petType.coinCost) {
-                            "Adopt for ${petType.coinCost} Sol Coins"
-                        } else {
-                            "Need ${petType.coinCost} Sol Coins"
-                        }
-                    )
+                    Text("Adopt at Town Pet Store (${petType.coinCost} Coins)")
                 }
             }
             else -> {
                 OutlinedButton(
-                    onClick = onAdopt,
+                    onClick = {},
                     enabled = false,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -916,96 +775,6 @@ private fun CompanionRosterCard(
                     Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Locked — Complete Milestone First")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ShopSectionHeader(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String
-) {
-    Column(modifier = Modifier.padding(top = 4.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(imageVector = icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Text(text = title, style = MaterialTheme.typography.titleMedium)
-        }
-        Text(
-            text = subtitle,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-private fun PetGearShopCard(
-    gear: PetGearSpec,
-    alreadyEquipped: Boolean,
-    canBuy: Boolean,
-    onBuy: () -> Unit
-) {
-    val statSummary = buildList {
-        if (gear.attackBonus > 0) add("+${gear.attackBonus} ATK")
-        if (gear.defenseBonus > 0) add("+${gear.defenseBonus} DEF")
-        if (gear.hpBonus > 0) add("+${gear.hpBonus} HP")
-    }.joinToString(" • ")
-
-    SolstrideCard(
-        modifier = Modifier.fillMaxWidth(),
-        strongBorder = alreadyEquipped
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = gear.name, style = MaterialTheme.typography.titleMedium)
-                    if (alreadyEquipped) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(
-                            imageVector = Icons.Filled.AutoAwesome,
-                            contentDescription = "Equipped on pet",
-                            tint = MaterialTheme.colorScheme.tertiary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-                Text(
-                    text = "TIER ${gear.tier} • $statSummary",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontFamily = JetBrainsMonoFontFamily,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = gear.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Spacer(modifier = Modifier.width(10.dp))
-            Button(
-                onClick = onBuy,
-                enabled = canBuy,
-                modifier = Modifier
-                    .height(48.dp)
-                    .testTag("buy_${gear.id}")
-            ) {
-                if (alreadyEquipped) {
-                    Text("Equipped")
-                } else {
-                    Icon(Icons.Filled.MonetizationOn, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("${gear.coinCost}")
                 }
             }
         }

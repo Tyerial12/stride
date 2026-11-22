@@ -252,7 +252,7 @@ fun WidgetHubQuickCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "⚡ ${snapshot.petWildStamina}/5 • 🍖 ${snapshot.petStepTreats} • 🏆 ${snapshot.petTotalWildWins}W",
+                        text = "⚡ ${snapshot.petWildStamina}/5 • 🪙 ${snapshot.solCoins}c • 🏆 ${snapshot.petTotalWildWins}W",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -1191,7 +1191,7 @@ private fun PetArenaWidgetPreview(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "❤ ${snapshot.petMoodPct}% • 🍖 ${snapshot.petStepTreats} • 🏆 ${snapshot.petTotalWildWins}W",
+                            text = "❤ ${snapshot.petMoodPct}% • 🪙 ${snapshot.solCoins}c • 🏆 ${snapshot.petTotalWildWins}W",
                             style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFFFCD34D),
                             fontWeight = FontWeight.Bold
@@ -1240,7 +1240,7 @@ private fun PetArenaWidgetPreview(
                     border = BorderStroke(1.dp, WidgetAccentGreen)
                 ) {
                     Text(
-                        text = if (snapshot.petStepTreats > 0) "🍖 FEED (Treat)" else "🍖 FEED (5c)",
+                        text = "🍖 FEED (5c)",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF6EE7B7),
                         fontWeight = FontWeight.Bold,

@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -34,9 +35,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,6 +60,9 @@ import com.example.data.model.HeroProfile
 import com.example.data.model.InventoryItem
 import com.example.data.model.LootChest
 import com.example.data.model.OwnedPet
+import com.example.data.model.TownNpcRole
+import com.example.data.model.TownPresencePlayer
+import com.example.data.model.WorldFogState
 import com.example.domain.ExpeditionEngine
 import com.example.domain.ExpeditionOutcomeReport
 import com.example.domain.ProgressionEngine
@@ -63,6 +74,7 @@ import com.example.ui.components.HeroSleepingBanner
 import com.example.ui.components.SolCoinBadge
 import com.example.ui.components.SolstrideCard
 import com.example.ui.components.StrideGaugeRing
+import com.example.ui.components.SunhavenTownPlazaCard
 import com.example.ui.components.TacticalStatBar
 import com.example.ui.components.TimedExpeditionCard
 import com.example.ui.components.WidgetHubQuickCard
@@ -74,6 +86,12 @@ import com.example.wear.WatchLinkStatus
 import com.example.widget.WidgetSnapshotState
 import java.util.Locale
 import kotlin.math.roundToInt
+
+private enum class TownHubSubTab(val label: String) {
+    PLAZA("Plaza"),
+    JOURNEY("Journey"),
+    TRACKERS("Trackers")
+}
 
 @Composable
 fun ExpeditionScreen(
@@ -121,12 +139,24 @@ fun ExpeditionScreen(
     sleepSourceLabel: String = "",
     activeSleepMinutes: Long = 0L,
     onWakeHero: () -> Unit = {},
+    worldFog: WorldFogState = WorldFogState(),
+    townPlayers: List<TownPresencePlayer> = emptyList(),
+    localTownPos: Pair<Float, Float> = 0.50f to 0.58f,
+    localTownFacingRight: Boolean = true,
+    localTownEmote: String = "",
+    unclaimedQuestCount: Int = 0,
+    onWalkToTown: (Float, Float) -> Unit = { _, _ -> },
+    onSendTownEmote: (String) -> Unit = {},
+    onOpenTownNpc: (TownNpcRole) -> Unit = {},
+    onInspectTownPlayer: (TownPresencePlayer) -> Unit = {},
+    onOpenCharacterMirror: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val encounterReady = profile.encounterProgress >= 100L
     val expeditionLocked = profile.hasActiveExpedition()
     val ext = LocalSolstrideColors.current
     val realm = ProgressionEngine.realmSpec(profile.currentRealm.toInt())
+    var activeTownTab by rememberSaveable { mutableStateOf(TownHubSubTab.PLAZA) }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -143,53 +173,185 @@ fun ExpeditionScreen(
             }
         }
 
-        // Visible 2D Hero Character Showcase with 6-Slot Equipped Gear, Specialization, Title & Pet
+        // Purpose-Sorted 3-Way Town Switcher: Plaza | Journey | Trackers
         item {
-            HeroShowcaseCard(
-                profile = profile,
-                stats = stats,
-                inventory = inventory,
-                equippedPet = equippedPet,
-                compact = true,
-                isSleeping = isHeroSleeping,
-                sleepSourceLabel = sleepSourceLabel
-            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                TownHubSubTab.entries.forEachIndexed { idx, tab ->
+                    val label = when (tab) {
+                        TownHubSubTab.PLAZA -> tab.label
+                        TownHubSubTab.JOURNEY -> if (encounterReady || battleActive) "${tab.label} •" else tab.label
+                        TownHubSubTab.TRACKERS -> tab.label
+                    }
+                    SegmentedButton(
+                        selected = activeTownTab == tab,
+                        onClick = { activeTownTab = tab },
+                        shape = SegmentedButtonDefaults.itemShape(idx, TownHubSubTab.entries.size),
+                        modifier = Modifier.testTag("town_subtab_${tab.name.lowercase()}"),
+                        icon = {
+                            Icon(
+                                imageVector = when (tab) {
+                                    TownHubSubTab.PLAZA -> Icons.Filled.Storefront
+                                    TownHubSubTab.JOURNEY -> Icons.AutoMirrored.Filled.DirectionsWalk
+                                    TownHubSubTab.TRACKERS -> Icons.Filled.Watch
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    ) {
+                        Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                    }
+                }
+            }
         }
 
-        // Step-Harvested Crafting Material Satchel & Survival Status Bar
-        item {
-            StepHarvestedMaterialSatchelCard(
-                hardcoreState = hardcoreState,
-                sunshards = profile.sunshards,
-                solCoins = profile.solCoins
-            )
-        }
+        when (activeTownTab) {
+            TownHubSubTab.PLAZA -> {
+                // Compact Purse & Hero Quick Summary Strip
+                item {
+                    SolstrideCard(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "${profile.displayName} • Lv.${profile.level} ${profile.resolvedClass().title}",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                                Text(
+                                    text = "Realm ${realm.realmNumber}: ${realm.name} • Power ${stats.computedHeroPower}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            SolCoinBadge(solCoins = profile.solCoins)
+                        }
+                    }
+                }
 
-        // Built-In On-Device Hardware Pedometer Card (Active ONLY when no watch is connected)
-        item {
-            OnDevicePedometerCard(
-                telemetry = telemetry,
-                todaySteps = todayPedometerSteps,
-                dailyGoal = dailyStepGoal,
-                pedometerEnabled = pedometerEnabled,
-                isWatchConnected = isWatchConnected,
-                onRequestPermission = onRequestStepPermission,
-                onTogglePedometer = onTogglePedometer,
-                onResetSession = onResetPedometerSession,
-                onCycleDailyGoal = onCycleDailyStepGoal
-            )
-        }
+                // Walkable Real-Time Multiplayer Sunhaven Plaza + 4 Town NPCs (Pet Store, Material Vendor, Skill Trainer, Blacksmith)
+                item {
+                    SunhavenTownPlazaCard(
+                        profile = profile,
+                        worldFog = worldFog,
+                        townPlayers = townPlayers,
+                        localPos = localTownPos,
+                        localFacingRight = localTownFacingRight,
+                        localEmote = localTownEmote,
+                        unclaimedQuestCount = unclaimedQuestCount,
+                        onWalkTo = onWalkToTown,
+                        onSendEmote = onSendTownEmote,
+                        onOpenNpc = onOpenTownNpc,
+                        onInspectPlayer = onInspectTownPlayer,
+                        onOpenCharacterMirror = onOpenCharacterMirror
+                    )
+                }
 
-        // In-App Live Widget Hub & Pin-to-Home Studio Launcher
-        item {
-            WidgetHubQuickCard(
-                snapshot = widgetSnapshot,
-                autoSyncConfig = widgetAutoSyncConfig,
-                currentTimeMs = currentTimeMs,
-                onOpenWidgetStudio = onOpenWidgetStudio,
-                onSyncWidgetsNow = onSyncWidgetsNow
-            )
-        }
+                // Unopened Loot Vault Quick Callout
+                if (chests.isNotEmpty()) {
+                    item {
+                        val topChest = chests.first()
+                        SolstrideCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            strongBorder = true
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Inventory2,
+                                        contentDescription = "Unopened treasure chests",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "${chests.size} Sealed Chest${if (chests.size == 1) "" else "s"} Waiting!",
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                        Text(
+                                            text = "${topChest.resolvedTier().title} (${topChest.ultraRareChancePct}% Ultra Rare odds)",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = { onOpenChest(topChest) },
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .testTag("expedition_quick_open_chest_button")
+                                ) {
+                                    Icon(Icons.Filled.LockOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Loot")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Quick Navigation Row into Journey & Step Trackers
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { activeTownTab = TownHubSubTab.JOURNEY },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("plaza_jump_journey_button"),
+                            border = BorderStroke(1.5.dp, ext.borderStrong)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.DirectionsWalk, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (encounterReady || battleActive) "Journey • Ready" else "Realms & Quests")
+                        }
+                        OutlinedButton(
+                            onClick = { activeTownTab = TownHubSubTab.TRACKERS },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("plaza_jump_trackers_button"),
+                            border = BorderStroke(1.5.dp, ext.borderStrong)
+                        ) {
+                            Icon(Icons.Filled.Watch, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Steps & Watch")
+                        }
+                    }
+                }
+            }
+
+            TownHubSubTab.JOURNEY -> {
+                // Visible 2D Hero Character Showcase with Custom Avatar, 6-Slot Equipped Gear, World Fog & Pet
+                item {
+                    HeroShowcaseCard(
+                        profile = profile,
+                        stats = stats,
+                        inventory = inventory,
+                        equippedPet = equippedPet,
+                        compact = true,
+                        isSleeping = isHeroSleeping,
+                        sleepSourceLabel = sleepSourceLabel,
+                        worldFog = worldFog
+                    )
+                }
 
         // Unopened Loot Vault Quick Callout
         if (chests.isNotEmpty()) {
@@ -430,8 +592,46 @@ fun ExpeditionScreen(
             }
         }
 
-        // Smart Watch & Health Connect Auto-Sync Card (5s Cadence)
-        item {
+                // 10-Realm World Map & Interactive Realm Selector
+                item {
+                    WorldMapTenRealmsCard(
+                        profile = profile,
+                        expeditionLocked = expeditionLocked,
+                        battleActive = battleActive,
+                        onSelectRealm = onSelectRealm,
+                        onChallengeBoss = { onEngageBattle(true) }
+                    )
+                }
+
+                // Wayfarer Shrines, Step Resource Veins & Obsidian Blood-Oath Gamble Altar
+                item {
+                    WayfarerEventsCard(
+                        profile = profile,
+                        hardcoreState = hardcoreState,
+                        expeditionLocked = expeditionLocked,
+                        onTriggerEvent = onTriggerWayfarerEvent
+                    )
+                }
+            }
+
+            TownHubSubTab.TRACKERS -> {
+                // Built-In On-Device Hardware Pedometer Card (Active ONLY when no watch is connected)
+                item {
+                    OnDevicePedometerCard(
+                        telemetry = telemetry,
+                        todaySteps = todayPedometerSteps,
+                        dailyGoal = dailyStepGoal,
+                        pedometerEnabled = pedometerEnabled,
+                        isWatchConnected = isWatchConnected,
+                        onRequestPermission = onRequestStepPermission,
+                        onTogglePedometer = onTogglePedometer,
+                        onResetSession = onResetPedometerSession,
+                        onCycleDailyGoal = onCycleDailyStepGoal
+                    )
+                }
+
+                // Smart Watch & Health Connect Auto-Sync Card (5s Cadence)
+                item {
             SolstrideCard(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -598,25 +798,26 @@ fun ExpeditionScreen(
             }
         }
 
-        // 10-Realm World Map & Interactive Realm Selector
-        item {
-            WorldMapTenRealmsCard(
-                profile = profile,
-                expeditionLocked = expeditionLocked,
-                battleActive = battleActive,
-                onSelectRealm = onSelectRealm,
-                onChallengeBoss = { onEngageBattle(true) }
-            )
-        }
+                // Step-Harvested Crafting Material Satchel & Survival Status Bar
+                item {
+                    StepHarvestedMaterialSatchelCard(
+                        hardcoreState = hardcoreState,
+                        sunshards = profile.sunshards,
+                        solCoins = profile.solCoins
+                    )
+                }
 
-        // Wayfarer Shrines, Step Resource Veins & Obsidian Blood-Oath Gamble Altar
-        item {
-            WayfarerEventsCard(
-                profile = profile,
-                hardcoreState = hardcoreState,
-                expeditionLocked = expeditionLocked,
-                onTriggerEvent = onTriggerWayfarerEvent
-            )
+                // In-App Live Widget Hub & Pin-to-Home Studio Launcher
+                item {
+                    WidgetHubQuickCard(
+                        snapshot = widgetSnapshot,
+                        autoSyncConfig = widgetAutoSyncConfig,
+                        currentTimeMs = currentTimeMs,
+                        onOpenWidgetStudio = onOpenWidgetStudio,
+                        onSyncWidgetsNow = onSyncWidgetsNow
+                    )
+                }
+            }
         }
     }
 }

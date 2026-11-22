@@ -14,12 +14,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.LocalFireDepartment
-import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -41,22 +40,25 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.model.HeroProfile
+import com.example.domain.ClassSkillCatalog
+import com.example.domain.ClassSkillKind
 import com.example.domain.ProgressionEngine
 import com.example.domain.QuestCategory
 import com.example.domain.QuestStatus
-import com.example.domain.SkillBranch
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.LocalSolstrideColors
 
 @Composable
 fun SkillTreePanel(
     profile: HeroProfile,
-    expeditionLocked: Boolean,
-    onUpgradeNode: (Int) -> Unit,
+    onVisitTownSkillTrainer: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val ext = LocalSolstrideColors.current
-    val ranks = remember(profile.skillRanks) { profile.parsedSkillRanks() }
+    val heroClass = profile.resolvedClass()
+    val classSkills = remember(heroClass) { ClassSkillCatalog.skillsFor(heroClass) }
+    val activeSkills = remember(classSkills) { classSkills.filter { it.kind == ClassSkillKind.ACTIVE } }
+    val passiveSkills = remember(classSkills) { classSkills.filter { it.kind == ClassSkillKind.PASSIVE } }
 
     Column(
         modifier = modifier
@@ -69,129 +71,225 @@ fun SkillTreePanel(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
             strongBorder = true
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Class Skill Tree",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Text(
-                        text = "Invest Mastery Points into permanent combat, defense & expedition survival skills. Skill ranks are kept through Prestige Rebirth!",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.5.dp, ext.borderStrong)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "${profile.unspentPoints} PTS",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontFamily = JetBrainsMonoFontFamily,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${heroClass.displayTitle} Skill Mastery",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            text = "Skills unlock automatically as your Hero levels up (Lv. 1–20). Visit Master Kaelen in Sunhaven Town to buy skill rank upgrades!",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    SolCoinBadge(solCoins = profile.solCoins)
+                }
+                Button(
+                    onClick = onVisitTownSkillTrainer,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("visit_town_skill_trainer_button")
+                ) {
+                    Icon(Icons.Filled.WorkspacePremium, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Train & Buy Skill Upgrades in Town")
                 }
             }
         }
 
-        SkillBranch.entries.forEach { branch ->
-            val branchNodes = ProgressionEngine.skillNodes.filter { it.branch == branch }
-            val branchIcon = when (branch) {
-                SkillBranch.SOLAR_OFFENSE -> Icons.Filled.LocalFireDepartment
-                SkillBranch.IRON_BASTION -> Icons.Filled.Shield
-                SkillBranch.WAYFARER_MASTERY -> Icons.Filled.Explore
-            }
-
-            SolstrideCard(modifier = Modifier.fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = branchIcon,
-                        contentDescription = branch.title,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(22.dp)
+        // Section 1: Active Combat Skills (Lv. 1, 5, 12)
+        SolstrideCard(modifier = Modifier.fillMaxWidth(), strongBorder = true) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Filled.Bolt,
+                    contentDescription = "Active class skills",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(text = "Active Combat Arts (3)", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = "Cast directly in tactical battles • Unlocked at Lv. 1, Lv. 5 & Lv. 12",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text(text = branch.title, style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            text = branch.subtitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                 }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                activeSkills.forEach { skill ->
+                    val unlocked = skill.isUnlockedAt(profile.level.toInt())
+                    val rank = ClassSkillCatalog.effectiveRank(profile, skill)
+                    val isMaxed = rank >= skill.maxRank
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    branchNodes.forEach { node ->
-                        val rank = ranks.getOrElse(node.index) { 0 }
-                        val isMaxed = rank >= node.maxRank
-                        val canUpgrade = !expeditionLocked && profile.unspentPoints > 0L && !isMaxed
-
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = MaterialTheme.shapes.medium,
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            border = BorderStroke(
-                                width = if (rank > 0) 1.5.dp else 1.dp,
-                                color = if (rank > 0) MaterialTheme.colorScheme.primary else ext.borderSubtle
-                            )
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(
+                            width = if (unlocked && rank > 0) 1.5.dp else 1.dp,
+                            color = if (unlocked && rank > 0) MaterialTheme.colorScheme.primary else ext.borderSubtle
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Text(text = node.name, style = MaterialTheme.typography.titleSmall)
-                                        Text(
-                                            text = "$rank/${node.maxRank}",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontFamily = JetBrainsMonoFontFamily,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(text = skill.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                                     Text(
-                                        text = node.perRankSummary,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        text = "R$rank/${skill.maxRank}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Button(
-                                    onClick = { onUpgradeNode(node.index) },
-                                    enabled = canUpgrade,
-                                    modifier = Modifier
-                                        .height(48.dp)
-                                        .testTag("skill_upgrade_${node.id}"),
-                                    contentPadding = PaddingValues(horizontal = 12.dp)
+                                Text(
+                                    text = "${skill.valorCost} Valor${if (skill.cooldownTurns > 0) " • ${skill.cooldownTurns}T CD" else " • 0T CD"} • Lv.${skill.unlockLevel}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    color = MaterialTheme.colorScheme.tertiary
+                                )
+                                Text(
+                                    text = skill.summary,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = skill.perRankSummary,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = when {
+                                    !unlocked -> MaterialTheme.colorScheme.surface
+                                    isMaxed -> MaterialTheme.colorScheme.tertiaryContainer
+                                    else -> MaterialTheme.colorScheme.primaryContainer
+                                },
+                                border = BorderStroke(1.dp, ext.borderSubtle)
+                            ) {
+                                Text(
+                                    text = when {
+                                        !unlocked -> "Lv.${skill.unlockLevel}"
+                                        isMaxed -> "MAX"
+                                        else -> "R$rank/${skill.maxRank}"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section 2: Class Passives (Lv. 2, 4, 7, 10, 15, 20)
+        SolstrideCard(modifier = Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Filled.WorkspacePremium,
+                    contentDescription = "Passive class skills",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(text = "Class Passive Mastery (6)", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = "Permanent stat, combat & expedition upgrades unlocked at Lv. 2–20",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                passiveSkills.forEach { skill ->
+                    val unlocked = skill.isUnlockedAt(profile.level.toInt())
+                    val rank = ClassSkillCatalog.effectiveRank(profile, skill)
+                    val isMaxed = rank >= skill.maxRank
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(
+                            width = if (rank > 0) 1.5.dp else 1.dp,
+                            color = if (rank > 0) MaterialTheme.colorScheme.primary else ext.borderSubtle
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    if (isMaxed) {
-                                        Text("MAX")
-                                    } else {
-                                        Icon(Icons.Filled.Add, contentDescription = "Upgrade ${node.name}", modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(2.dp))
-                                        Text("+1")
-                                    }
+                                    Text(text = skill.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "R$rank/${skill.maxRank}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
                                 }
+                                Text(
+                                    text = skill.perRankSummary,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = when {
+                                    !unlocked -> MaterialTheme.colorScheme.surface
+                                    isMaxed -> MaterialTheme.colorScheme.tertiaryContainer
+                                    else -> MaterialTheme.colorScheme.primaryContainer
+                                },
+                                border = BorderStroke(1.dp, ext.borderSubtle)
+                            ) {
+                                Text(
+                                    text = when {
+                                        !unlocked -> "Lv.${skill.unlockLevel}"
+                                        isMaxed -> "MAX"
+                                        else -> "R$rank/${skill.maxRank}"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
                             }
                         }
                     }
@@ -213,9 +311,10 @@ fun QuestsAndPrestigePanel(
 ) {
     val ext = LocalSolstrideColors.current
     var showPrestigeConfirm by remember { mutableStateOf(false) }
-    val canPrestige = ProgressionEngine.canPrestige(profile) && !expeditionLocked && !battleActive
+    val prestigeEval = remember(profile) { ProgressionEngine.evaluatePrestigeRequirements(profile) }
+    val canPrestige = prestigeEval.allConditionsMet && !expeditionLocked && !battleActive
     val currentNumeral = ProgressionEngine.prestigeRomanNumeral(profile.prestigeLevel.toInt())
-    val nextNumeral = ProgressionEngine.prestigeRomanNumeral((profile.prestigeLevel + 1L).toInt())
+    val nextNumeral = ProgressionEngine.prestigeRomanNumeral(prestigeEval.nextPrestigeLevel.toInt())
 
     Column(
         modifier = modifier
@@ -255,7 +354,7 @@ fun QuestsAndPrestigePanel(
                             text = if (profile.prestigeLevel > 0L) {
                                 "Active Permanent Bonus: +${profile.prestigeLevel * 15}% All Stats • +${profile.prestigeLevel * 10}% XP/Shards • +${profile.prestigeLevel * 3}% Survival"
                             } else {
-                                "Unlock at Level ${ProgressionEngine.PRESTIGE_MIN_LEVEL} or after clearing Realm ${ProgressionEngine.PRESTIGE_ALT_REALM_CLEARED}"
+                                "Meet all ${prestigeEval.totalCount} Trials of Ascension to unlock Prestige $nextNumeral"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer
@@ -266,10 +365,111 @@ fun QuestsAndPrestigePanel(
 
             Spacer(modifier = Modifier.height(10.dp))
             Text(
-                text = "Ascending to Prestige $nextNumeral resets Hero Level to 1 and Realm Chapter to I, while KEEPING all Weapons, Armor, Relics, Loot Chests, Companions, Sol Coins, Sunshards, and Skill Tree ranks — plus permanent +15% All Stats!",
+                text = "Ascending to Prestige $nextNumeral resets Hero Level to 1 and Realm Chapter to I, while KEEPING all Weapons, Armor, Relics, Loot Chests, Companions, Sunshards, remaining Sol Coins, and Skill Tree ranks — plus permanent +15% All Stats!",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            // Trials of Solar Ascension Condition Checklist
+            if (!prestigeEval.isMaxPrestigeReached) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("prestige_conditions_checklist"),
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(
+                        width = if (prestigeEval.allConditionsMet) 1.5.dp else 1.dp,
+                        color = if (prestigeEval.allConditionsMet) MaterialTheme.colorScheme.primary else ext.borderSubtle
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "TRIALS FOR PRESTIGE $nextNumeral",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "${prestigeEval.metCount}/${prestigeEval.totalCount} MET",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                color = if (prestigeEval.allConditionsMet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        prestigeEval.conditions.forEach { cond ->
+                            val curFormatted = String.format(java.util.Locale.US, "%,d", cond.currentValue)
+                            val targetFormatted = String.format(java.util.Locale.US, "%,d", cond.targetValue)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("prestige_condition_${cond.id}"),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = if (cond.isMet) Icons.Filled.CheckCircle else Icons.Filled.Lock,
+                                            contentDescription = if (cond.isMet) "Condition met" else "Condition locked",
+                                            tint = if (cond.isMet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Column {
+                                            Text(
+                                                text = cond.title,
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (cond.isMet) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = cond.subtitle,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "$curFormatted/$targetFormatted",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (cond.isMet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                LinearProgressIndicator(
+                                    progress = { cond.progressFraction },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(5.dp),
+                                    color = if (cond.isMet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
             Button(
                 onClick = { showPrestigeConfirm = true },
@@ -283,13 +483,14 @@ fun QuestsAndPrestigePanel(
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 )
             ) {
-                Icon(Icons.Filled.AutoAwesome, contentDescription = null)
+                Icon(Icons.Filled.WorkspacePremium, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (canPrestige) {
-                        "Ascend to Prestige $nextNumeral (+15% Permanent Stats)"
-                    } else {
-                        "Lvl ${profile.level}/${ProgressionEngine.PRESTIGE_MIN_LEVEL} or Realms ${profile.highestRealmCleared}/${ProgressionEngine.PRESTIGE_ALT_REALM_CLEARED}"
+                    text = when {
+                        prestigeEval.isMaxPrestigeReached -> "Max Prestige Reached"
+                        canPrestige -> "Ascend to Prestige $nextNumeral (-${prestigeEval.solCoinTributeCost} Coins)"
+                        prestigeEval.allConditionsMet && (expeditionLocked || battleActive) -> "Finish Battle / Expedition First"
+                        else -> "Complete Trials (${prestigeEval.metCount}/${prestigeEval.totalCount}) to Ascend"
                     },
                     style = MaterialTheme.typography.titleSmall
                 )
@@ -387,6 +588,9 @@ fun QuestsAndPrestigePanel(
                                     )
                                     Spacer(modifier = Modifier.height(6.dp))
                                     val rewardText = buildString {
+                                        if (status.spec.solCoinReward > 0L) {
+                                            append("+${status.spec.solCoinReward} Sol Coins • ")
+                                        }
                                         append("+${status.spec.sunshardReward} Shards • +${status.spec.xpReward} XP")
                                         status.spec.chestRewardTier?.let { tier ->
                                             append(" • ${tier.title} (${status.spec.chestUltraRarePct}% Ultra Rare)")
@@ -396,8 +600,19 @@ fun QuestsAndPrestigePanel(
                                         text = rewardText,
                                         style = MaterialTheme.typography.labelSmall,
                                         fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.primary
                                     )
+                                    status.spec.companionReward?.let { companion ->
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "🐾 Companion Reward: ${companion.displayName} (${companion.rarity.label})",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontFamily = JetBrainsMonoFontFamily,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = MaterialTheme.colorScheme.tertiary
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -413,7 +628,7 @@ fun QuestsAndPrestigePanel(
             title = { Text("Confirm Solar Ascension ($nextNumeral)?") },
             text = {
                 Text(
-                    "Your Hero Level resets to 1 and Realm resets to Realm I, awarding +${2 + profile.prestigeLevel + 1} starting Mastery Points and a permanent +15% All Stats, +10% XP/Sunshards, and +3% Expedition Survival bonus.\n\nYou KEEP all Weapons, Armor, Relics, unopened Loot Chests, Pets, Sol Coins, Sunshards, and Skill Tree ranks."
+                    "All ${prestigeEval.totalCount} Ascension Trials are complete!\n\nAscending offers ${prestigeEval.solCoinTributeCost} Sol Coins, resets Hero Level to 1 and Realm to Realm I, and grants +${2 + prestigeEval.nextPrestigeLevel} starting Mastery Points plus a permanent +15% All Stats, +10% XP/Sunshards, and +3% Expedition Survival bonus.\n\nYou KEEP all Weapons, Armor, Relics, unopened Loot Chests, Pets, Sunshards, remaining Sol Coins, and Skill Tree ranks."
                 )
             },
             confirmButton = {

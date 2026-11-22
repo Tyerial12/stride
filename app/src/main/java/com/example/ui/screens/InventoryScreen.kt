@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MonetizationOn
@@ -78,6 +79,7 @@ import com.example.data.model.ItemSlot
 import com.example.data.model.LootChest
 import com.example.data.model.MercenaryContractSpec
 import com.example.data.model.OwnedPet
+import com.example.data.model.WorldFogState
 import com.example.domain.AlchemistRecipeSpec
 import com.example.domain.BlackMarketOfferSpec
 import com.example.domain.ExpeditionEngine
@@ -98,10 +100,10 @@ import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.LocalSolstrideColors
 
 private enum class HeroSubTab(val label: String) {
-    GEAR_FORGE("Forge"),
-    TOWN_MARKET("Town"),
-    SKILLS_SPEC("Skills"),
-    CODEX_QUESTS("Codex")
+    GEAR("Gear"),
+    CRAFT("Craft"),
+    BUILD("Build"),
+    QUESTS("Quests")
 }
 
 private enum class InventoryFilter(val label: String, val slotFilter: ItemSlot? = null) {
@@ -145,17 +147,19 @@ fun InventoryScreen(
     onRerollItemPerk: (InventoryItem) -> Unit = {},
     onAscendItemRarity: (InventoryItem) -> Unit = {},
     onSocketRune: (InventoryItem, ElementalAffinity) -> Unit = { _, _ -> },
-    onForgeCustomEquipment: (ItemSlot, ForgeBlueprintTier, ElementalAffinity?) -> Unit = { _, _, _ -> },
+    onForgeCustomEquipment: (ItemSlot, ForgeBlueprintTier, ElementalAffinity?, Boolean) -> Unit = { _, _, _, _ -> },
     onBrewAlchemistRecipe: (AlchemistRecipeSpec) -> Unit = {},
-    onBuyBlackMarketOffer: (BlackMarketOfferSpec) -> Unit = {},
-    onHireMercenaryContract: (MercenaryContractSpec) -> Unit = {},
+    onVisitTownMarket: () -> Unit = {},
+    onVisitTownSkillTrainer: () -> Unit = {},
     onResetAllProgress: () -> Unit = {},
     onSalvageItem: (InventoryItem) -> Unit,
+    onOpenCharacterMirror: () -> Unit = {},
+    worldFog: WorldFogState = WorldFogState(),
     isHeroSleeping: Boolean = false,
     sleepSourceLabel: String = "",
     modifier: Modifier = Modifier
 ) {
-    var activeSubTab by remember { mutableStateOf(HeroSubTab.GEAR_FORGE) }
+    var activeSubTab by remember { mutableStateOf(HeroSubTab.GEAR) }
     var selectedFilter by remember { mutableStateOf(InventoryFilter.ALL) }
     var useForgeStabilizer by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
@@ -243,15 +247,15 @@ fun InventoryScreen(
             }
         }
 
-        // 4-Way Hero & Sanctuary Town Switcher: Forge | Town | Skills | Codex
+        // 4-Way Purpose-Sorted Hero Switcher: Gear | Craft | Build | Quests
         item {
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 HeroSubTab.entries.forEachIndexed { idx, tab ->
                     val label = when (tab) {
-                        HeroSubTab.GEAR_FORGE -> if (chests.isNotEmpty()) "Forge (${chests.size})" else tab.label
-                        HeroSubTab.TOWN_MARKET -> tab.label
-                        HeroSubTab.SKILLS_SPEC -> if (profile.unspentPoints > 0L) "Skills (${profile.unspentPoints})" else tab.label
-                        HeroSubTab.CODEX_QUESTS -> if (claimableQuestCount > 0) "Codex ($claimableQuestCount)" else tab.label
+                        HeroSubTab.GEAR -> if (chests.isNotEmpty()) "Gear (${chests.size})" else tab.label
+                        HeroSubTab.CRAFT -> tab.label
+                        HeroSubTab.BUILD -> if (profile.unspentPoints > 0L) "Build (${profile.unspentPoints})" else tab.label
+                        HeroSubTab.QUESTS -> if (claimableQuestCount > 0) "Quests ($claimableQuestCount)" else tab.label
                     }
                     SegmentedButton(
                         selected = activeSubTab == tab,
@@ -261,10 +265,10 @@ fun InventoryScreen(
                         icon = {
                             Icon(
                                 imageVector = when (tab) {
-                                    HeroSubTab.GEAR_FORGE -> Icons.Filled.Shield
-                                    HeroSubTab.TOWN_MARKET -> Icons.Filled.Storefront
-                                    HeroSubTab.SKILLS_SPEC -> Icons.Filled.AccountTree
-                                    HeroSubTab.CODEX_QUESTS -> Icons.Filled.MenuBook
+                                    HeroSubTab.GEAR -> Icons.Filled.Shield
+                                    HeroSubTab.CRAFT -> Icons.Filled.Build
+                                    HeroSubTab.BUILD -> Icons.Filled.AccountTree
+                                    HeroSubTab.QUESTS -> Icons.Filled.EmojiEvents
                                 },
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp)
@@ -278,83 +282,7 @@ fun InventoryScreen(
         }
 
         when (activeSubTab) {
-            HeroSubTab.TOWN_MARKET -> {
-                item {
-                    SanctuaryTownMarketPanel(
-                        profile = profile,
-                        hardcoreState = hardcoreState,
-                        expeditionLocked = expeditionLocked,
-                        onBuyBlackMarketOffer = onBuyBlackMarketOffer,
-                        onHireMercenaryContract = onHireMercenaryContract,
-                        onBrewAlchemistRecipe = onBrewAlchemistRecipe
-                    )
-                }
-            }
-            HeroSubTab.SKILLS_SPEC -> {
-                item {
-                    ClassSpecializationPanel(
-                        profile = profile,
-                        stats = stats,
-                        hardcoreState = hardcoreState,
-                        expeditionLocked = expeditionLocked,
-                        onSelectClass = onSelectClass,
-                        onSelectSpecialization = onSelectSpecialization
-                    )
-                }
-                item {
-                    SkillTreePanel(
-                        profile = profile,
-                        expeditionLocked = expeditionLocked,
-                        onUpgradeNode = onUpgradeSkillNode
-                    )
-                }
-            }
-            HeroSubTab.CODEX_QUESTS -> {
-                item {
-                    BestiaryAndTitlesPanel(
-                        profile = profile,
-                        stats = stats,
-                        hardcoreState = hardcoreState,
-                        onSelectHeroTitle = onSelectHeroTitle
-                    )
-                }
-                item {
-                    QuestsAndPrestigePanel(
-                        profile = profile,
-                        questStatuses = questStatuses,
-                        expeditionLocked = expeditionLocked,
-                        battleActive = battleActive,
-                        onClaimQuest = onClaimQuest,
-                        onTriggerPrestige = onTriggerPrestige
-                    )
-                }
-                item {
-                    DangerZoneResetCard(
-                        onOpenResetConfirmation = { showResetConfirmDialog = true }
-                    )
-                }
-            }
-            HeroSubTab.GEAR_FORGE -> {
-                // Live 2D Hero Showcase with 6-Slot Equipped Gear & Active Perks
-                item {
-                    HeroShowcaseCard(
-                        profile = profile,
-                        stats = stats,
-                        inventory = inventory,
-                        equippedPet = equippedPet,
-                        isSleeping = isHeroSleeping,
-                        sleepSourceLabel = sleepSourceLabel
-                    )
-                }
-
-                // Persistent Sealed Loot Chest Vault
-                item {
-                    LootVaultSection(
-                        chests = chests,
-                        onOpenChest = onOpenChest
-                    )
-                }
-
+            HeroSubTab.CRAFT -> {
                 // Custom Weapon & Armor Forging Anvil (Craft from Step & Battle Materials)
                 item {
                     CustomGearForgeCard(
@@ -365,17 +293,26 @@ fun InventoryScreen(
                     )
                 }
 
-                // Blacksmith Masterwork Forge Controls (Durability Repair All, Stabilizer Seal, Rune Pouch)
+                // Alchemist Crafting & Town Market Redirect (All buying happens strictly in Sunhaven Plaza)
                 item {
-                    BlacksmithForgeHeaderCard(
+                    AlchemistCraftingPanel(
+                        profile = profile,
+                        hardcoreState = hardcoreState,
+                        expeditionLocked = expeditionLocked,
+                        onBrewAlchemistRecipe = onBrewAlchemistRecipe,
+                        onVisitTownMarket = onVisitTownMarket
+                    )
+                }
+            }
+            HeroSubTab.BUILD -> {
+                item {
+                    ClassSpecializationPanel(
                         profile = profile,
                         stats = stats,
                         hardcoreState = hardcoreState,
-                        inventory = inventory,
                         expeditionLocked = expeditionLocked,
-                        useStabilizer = useForgeStabilizer,
-                        onToggleStabilizer = { useForgeStabilizer = !useForgeStabilizer },
-                        onRepairAllEquipped = onRepairAllEquipped
+                        onSelectClass = onSelectClass,
+                        onSelectSpecialization = onSelectSpecialization
                     )
                 }
 
@@ -455,6 +392,95 @@ fun InventoryScreen(
                     }
                 }
 
+                item {
+                    SkillTreePanel(
+                        profile = profile,
+                        onVisitTownSkillTrainer = onVisitTownSkillTrainer
+                    )
+                }
+            }
+            HeroSubTab.QUESTS -> {
+                item {
+                    QuestsAndPrestigePanel(
+                        profile = profile,
+                        questStatuses = questStatuses,
+                        expeditionLocked = expeditionLocked,
+                        battleActive = battleActive,
+                        onClaimQuest = onClaimQuest,
+                        onTriggerPrestige = onTriggerPrestige
+                    )
+                }
+                item {
+                    BestiaryAndTitlesPanel(
+                        profile = profile,
+                        stats = stats,
+                        hardcoreState = hardcoreState,
+                        onSelectHeroTitle = onSelectHeroTitle
+                    )
+                }
+                item {
+                    DangerZoneResetCard(
+                        onOpenResetConfirmation = { showResetConfirmDialog = true }
+                    )
+                }
+            }
+            HeroSubTab.GEAR -> {
+                // Live 2D Hero Showcase with Custom Avatar, 6-Slot Equipped Gear & Active Perks
+                item {
+                    HeroShowcaseCard(
+                        profile = profile,
+                        stats = stats,
+                        inventory = inventory,
+                        equippedPet = equippedPet,
+                        isSleeping = isHeroSleeping,
+                        sleepSourceLabel = sleepSourceLabel,
+                        worldFog = worldFog
+                    )
+                }
+
+                // Sanctuary Mirror (Rename Hero, Change Class & Customize 2D Appearance)
+                item {
+                    OutlinedButton(
+                        onClick = onOpenCharacterMirror,
+                        enabled = !expeditionLocked,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("hero_tab_character_mirror_button"),
+                        border = BorderStroke(1.5.dp, ext.borderStrong)
+                    ) {
+                        Icon(Icons.Filled.Face, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Sanctuary Mirror — Edit Name, Class & 2D Look",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Persistent Sealed Loot Chest Vault
+                item {
+                    LootVaultSection(
+                        chests = chests,
+                        onOpenChest = onOpenChest
+                    )
+                }
+
+                // Blacksmith Masterwork Forge Controls (Durability Repair All, Stabilizer Seal, Rune Pouch)
+                item {
+                    BlacksmithForgeHeaderCard(
+                        profile = profile,
+                        stats = stats,
+                        hardcoreState = hardcoreState,
+                        inventory = inventory,
+                        expeditionLocked = expeditionLocked,
+                        useStabilizer = useForgeStabilizer,
+                        onToggleStabilizer = { useForgeStabilizer = !useForgeStabilizer },
+                        onRepairAllEquipped = onRepairAllEquipped
+                    )
+                }
+
                 // Inventory Header + Currencies + 6-Slot Filter Chips
                 item {
                     Row(
@@ -511,7 +537,7 @@ fun InventoryScreen(
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = "No items in this slot filter yet. Open Sealed Chests or visit the Black-Market Merchant in the Town tab!",
+                                    text = "No items in this slot filter yet. Open Sealed Chests or visit Zari's Market in Sunhaven Town!",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -537,13 +563,6 @@ fun InventoryScreen(
                         )
                     }
                 }
-
-                // Also show Danger Zone Reset at the bottom of the main Forge tab so it is always easy to find
-                item {
-                    DangerZoneResetCard(
-                        onOpenResetConfirmation = { showResetConfirmDialog = true }
-                    )
-                }
             }
         }
     }
@@ -555,7 +574,7 @@ private fun CustomGearForgeCard(
     profile: HeroProfile,
     hardcoreState: HardcoreRpgState,
     expeditionLocked: Boolean,
-    onForgeCustomEquipment: (ItemSlot, ForgeBlueprintTier, ElementalAffinity?) -> Unit
+    onForgeCustomEquipment: (ItemSlot, ForgeBlueprintTier, ElementalAffinity?, Boolean) -> Unit
 ) {
     val ext = LocalSolstrideColors.current
     val craftableSlots = remember {
@@ -571,7 +590,10 @@ private fun CustomGearForgeCard(
     var selectedSlot by remember { mutableStateOf(ItemSlot.ARMOR) }
     var selectedTier by remember { mutableStateOf(ForgeBlueprintTier.BRONZE_SURVIVOR) }
     var selectedElement by remember { mutableStateOf<ElementalAffinity?>(null) }
+    var useStarforgedIngot by remember { mutableStateOf(false) }
 
+    val ingotAvailable = hardcoreState.starforgedIngots > 0L
+    val effectiveUseIngot = useStarforgedIngot && ingotAvailable
     val essenceCost = selectedTier.essenceCost + if (selectedElement != null) 4L else 0L
     val meetsLevel = profile.level >= selectedTier.minHeroLevel.toLong()
     val canAfford = meetsLevel &&
@@ -709,9 +731,35 @@ private fun CustomGearForgeCard(
             }
         }
 
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "4. Starforged Masterwork Ingot (Owned: ${hardcoreState.starforgedIngots})",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Buy from the Rare Materials Market in Sunhaven Plaza • Guarantees +1 Rarity Tier & +18% Power",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = effectiveUseIngot,
+                onCheckedChange = { useStarforgedIngot = it },
+                enabled = !expeditionLocked && ingotAvailable,
+                modifier = Modifier.testTag("forge_starforged_ingot_switch")
+            )
+        }
+
         Spacer(modifier = Modifier.height(10.dp))
         Button(
-            onClick = { onForgeCustomEquipment(selectedSlot, selectedTier, selectedElement) },
+            onClick = { onForgeCustomEquipment(selectedSlot, selectedTier, selectedElement, effectiveUseIngot) },
             enabled = !expeditionLocked && canAfford,
             modifier = Modifier
                 .fillMaxWidth()
@@ -723,8 +771,9 @@ private fun CustomGearForgeCard(
             Text(
                 text = when {
                     !meetsLevel -> "Requires Hero Level ${selectedTier.minHeroLevel}"
+                    canAfford && effectiveUseIngot -> "Masterwork Forge ${selectedSlot.label} (+1 Tier!)"
                     canAfford -> "Forge Custom ${selectedSlot.label} (${selectedTier.baseRarity.label}+)"
-                    else -> "Gather More Materials (Walk / Battle)"
+                    else -> "Gather More Materials (Walk / Battle / Town)"
                 }
             )
         }
@@ -833,126 +882,49 @@ private fun BlacksmithForgeHeaderCard(
 }
 
 @Composable
-private fun SanctuaryTownMarketPanel(
+private fun AlchemistCraftingPanel(
     profile: HeroProfile,
     hardcoreState: HardcoreRpgState,
     expeditionLocked: Boolean,
-    onBuyBlackMarketOffer: (BlackMarketOfferSpec) -> Unit,
-    onHireMercenaryContract: (MercenaryContractSpec) -> Unit,
-    onBrewAlchemistRecipe: (AlchemistRecipeSpec) -> Unit
+    onBrewAlchemistRecipe: (AlchemistRecipeSpec) -> Unit,
+    onVisitTownMarket: () -> Unit
 ) {
     val ext = LocalSolstrideColors.current
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        // Obsidian Black-Market Merchant (Sol Coin Sinks)
-        SolstrideCard(modifier = Modifier.fillMaxWidth(), strongBorder = true) {
+        // Town Market Callout (Buying happens strictly in Sunhaven Plaza)
+        SolstrideCard(
+            modifier = Modifier.fillMaxWidth(),
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            strongBorder = true
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Obsidian Black-Market Merchant", style = MaterialTheme.typography.headlineSmall)
                     Text(
-                        text = "Spend Sol Coins on Mythic 6-Slot Gear Caches, Elemental Runes, Materials & Physician Cures",
+                        text = "Need Materials, Black-Market Goods or Mercenaries?",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Text(
+                        text = "All shopping takes place exclusively in Sunhaven Plaza.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
                     )
                 }
-                SolCoinBadge(solCoins = profile.solCoins)
-            }
-            Spacer(modifier = Modifier.height(10.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ProgressionEngine.blackMarketOffers.forEach { offer ->
-                    val canBuy = !expeditionLocked && profile.solCoins >= offer.solCoinCost
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        border = BorderStroke(1.dp, ext.borderSubtle)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(offer.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                                Text(
-                                    text = offer.subtitle,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Button(
-                                onClick = { onBuyBlackMarketOffer(offer) },
-                                enabled = canBuy,
-                                modifier = Modifier
-                                    .height(48.dp)
-                                    .testTag("black_market_${offer.id}")
-                            ) {
-                                Icon(Icons.Filled.MonetizationOn, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("${offer.solCoinCost}")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Mercenary Guild Contracts (5-Battle Combat Buffs for Sol Coins)
-        SolstrideCard(modifier = Modifier.fillMaxWidth()) {
-            Text("Mercenary Guild Contracts (5 Battles)", style = MaterialTheme.typography.titleLarge)
-            Text(
-                text = if (hardcoreState.mercenaryBattlesLeft > 0) {
-                    "Active Contract: ${MercenaryContractSpec.fromId(hardcoreState.mercenaryContractId)?.name ?: "Active"} (${hardcoreState.mercenaryBattlesLeft} battles left)"
-                } else {
-                    "Hire an elite mercenary with Sol Coins to boost your Hero for the next 5 battles"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                MercenaryContractSpec.entries.forEach { contract ->
-                    val isCurrent = hardcoreState.mercenaryContractId == contract.id && hardcoreState.mercenaryBattlesLeft > 0
-                    val canHire = !expeditionLocked && profile.solCoins >= contract.solCoinCost
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                        border = BorderStroke(1.dp, if (isCurrent) MaterialTheme.colorScheme.primary else ext.borderSubtle)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(contract.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                                Text(
-                                    text = "${contract.summary} (${contract.durationBattles} Battles)",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Button(
-                                onClick = { onHireMercenaryContract(contract) },
-                                enabled = canHire,
-                                modifier = Modifier
-                                    .height(48.dp)
-                                    .testTag("hire_mercenary_${contract.id}")
-                            ) {
-                                Icon(Icons.Filled.MonetizationOn, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(if (isCurrent) "Renew (${contract.solCoinCost})" else "${contract.solCoinCost}")
-                            }
-                        }
-                    }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = onVisitTownMarket,
+                    modifier = Modifier
+                        .height(48.dp)
+                        .testTag("craft_visit_town_market_button")
+                ) {
+                    Icon(Icons.Filled.Storefront, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Town Market")
                 }
             }
         }
@@ -1030,6 +1002,7 @@ private fun SanctuaryTownMarketPanel(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ClassSpecializationPanel(
     profile: HeroProfile,
@@ -1043,9 +1016,10 @@ private fun ClassSpecializationPanel(
     SolstrideCard(modifier = Modifier.fillMaxWidth(), strongBorder = true) {
         Text(text = "Base Class & Advanced Specialization", style = MaterialTheme.typography.titleLarge)
         Spacer(modifier = Modifier.height(8.dp))
-        Row(
+        FlowRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             HeroClass.entries.forEach { cls ->
                 val active = profile.resolvedClass() == cls
@@ -1054,9 +1028,7 @@ private fun ClassSpecializationPanel(
                     enabled = !expeditionLocked,
                     onClick = { onSelectClass(cls) },
                     label = { Text(cls.displayTitle) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("class_${cls.name.lowercase()}_chip")
+                    modifier = Modifier.testTag("class_${cls.name.lowercase()}_chip")
                 )
             }
         }

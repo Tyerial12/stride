@@ -12,9 +12,11 @@ import com.example.data.local.SolstrideSettings
 import com.example.data.local.SyncLogEntity
 import com.example.data.model.ClassSpecialization
 import com.example.data.model.DerivedHeroStats
+import com.example.data.model.DuelActionKind
 import com.example.data.model.ElementalAffinity
 import com.example.data.model.GearPerkType
 import com.example.data.model.HardcoreRpgState
+import com.example.data.model.HeroAvatarConfig
 import com.example.data.model.HeroClass
 import com.example.data.model.HeroProfile
 import com.example.data.model.HeroTitleSpec
@@ -24,14 +26,23 @@ import com.example.data.model.ItemSlot
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LootChest
 import com.example.data.model.MercenaryContractSpec
+import com.example.data.model.MultiplayerChatMessage
+import com.example.data.model.MultiplayerDuel
+import com.example.data.model.MultiplayerPetPlaydate
+import com.example.data.model.MultiplayerSubTab
 import com.example.data.model.OwnedPet
 import com.example.data.model.PetCatalog
 import com.example.data.model.PetFoodSpec
 import com.example.data.model.PetGearSlot
 import com.example.data.model.PetGearSpec
+import com.example.data.model.PetPlayActivity
 import com.example.data.model.PetType
 import com.example.data.model.StepSource
+import com.example.data.model.TownMaterialOffer
+import com.example.data.model.TownNpcRole
+import com.example.data.model.TownPresencePlayer
 import com.example.data.model.UiState
+import com.example.data.model.WorldFogState
 import com.example.data.model.computeDerivedStats
 import com.example.data.model.currentCalendarDateKey
 import com.example.data.model.currentIsoWeekKey
@@ -40,6 +51,7 @@ import com.example.domain.BattleMode
 import com.example.domain.BattleState
 import com.example.domain.BlackMarketOfferSpec
 import com.example.domain.ChestOpenResult
+import com.example.domain.ClassSkillCatalog
 import com.example.domain.CombatEngine
 import com.example.domain.ExpeditionEngine
 import com.example.domain.ExpeditionOutcomeReport
@@ -61,6 +73,7 @@ import com.example.wear.HealthConnectStepReader
 import com.example.wear.HealthConnectSyncStatus
 import com.example.wear.WatchLinkStatus
 import com.example.wear.WatchSleepSnapshot
+import com.example.widget.WildPetBattleEngine
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -87,6 +100,7 @@ enum class SolstrideTab(val route: String) {
     BATTLE("battle"),
     PETS("pets"),
     INVENTORY("inventory"),
+    MULTIPLAYER("multiplayer"),
     LEADERBOARD("leaderboard")
 }
 
@@ -180,6 +194,32 @@ class SolstrideViewModel(
 
     private val _isOpeningChest = MutableStateFlow(false)
     val isOpeningChest: StateFlow<Boolean> = _isOpeningChest.asStateFlow()
+
+    // --- Character Creator Studio & Sunhaven Plaza Multiplayer Town ---
+    private val _showCharacterStudio = MutableStateFlow(false)
+    val showCharacterStudio: StateFlow<Boolean> = _showCharacterStudio.asStateFlow()
+
+    private val _selectedTownNpc = MutableStateFlow<TownNpcRole?>(null)
+    val selectedTownNpc: StateFlow<TownNpcRole?> = _selectedTownNpc.asStateFlow()
+
+    private val _inspectedTownPlayer = MutableStateFlow<TownPresencePlayer?>(null)
+    val inspectedTownPlayer: StateFlow<TownPresencePlayer?> = _inspectedTownPlayer.asStateFlow()
+
+    private val _localTownPos = MutableStateFlow(0.50f to 0.58f)
+    val localTownPos: StateFlow<Pair<Float, Float>> = _localTownPos.asStateFlow()
+
+    private val _localTownFacingRight = MutableStateFlow(true)
+    val localTownFacingRight: StateFlow<Boolean> = _localTownFacingRight.asStateFlow()
+
+    private val _localTownEmote = MutableStateFlow("")
+    val localTownEmote: StateFlow<String> = _localTownEmote.asStateFlow()
+
+    private val _multiplayerSubTab = MutableStateFlow(MultiplayerSubTab.PLAYERS)
+    val multiplayerSubTab: StateFlow<MultiplayerSubTab> = _multiplayerSubTab.asStateFlow()
+
+    private val claimedDuelRewardIds = mutableSetOf<String>()
+
+    private var lastTownPresenceSyncMs: Long = 0L
 
     val settings: StateFlow<SolstrideSettings> = preferences.settingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), SolstrideSettings())
@@ -313,12 +353,73 @@ class SolstrideViewModel(
         computeDerivedStats(profile, items, activePet, hcState)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), null)
 
-    val questStatuses: StateFlow<List<QuestStatus>> = heroProfileState
-        .map { pState ->
-            val profile = (pState as? UiState.Success)?.data ?: return@map emptyList()
-            ProgressionEngine.evaluateQuests(profile, currentCalendarDateKey())
+    val townPlayers: StateFlow<List<TownPresencePlayer>> = repository.observeTownPresence(currentUserId)
+        .catch { error ->
+            val fsError = generateSequence(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>()
+                .firstOrNull()
+            if (fsError == null && error is CancellationException) throw error
+            Log.w(TAG, "Town presence observer error", fsError ?: error)
+            emit(emptyList())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
+    val multiplayerChatMessages: StateFlow<List<MultiplayerChatMessage>> = repository.observeMultiplayerChat(currentUserId)
+        .catch { error ->
+            val fsError = generateSequence(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>()
+                .firstOrNull()
+            if (fsError == null && error is CancellationException) throw error
+            Log.w(TAG, "Multiplayer chat observer error", fsError ?: error)
+            emit(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
+    val multiplayerDuels: StateFlow<List<MultiplayerDuel>> = repository.observeMultiplayerDuels(currentUserId)
+        .catch { error ->
+            val fsError = generateSequence(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>()
+                .firstOrNull()
+            if (fsError == null && error is CancellationException) throw error
+            Log.w(TAG, "Multiplayer duels observer error", fsError ?: error)
+            emit(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
+    val multiplayerPetPlaydates: StateFlow<List<MultiplayerPetPlaydate>> = repository.observePetPlaydates(currentUserId)
+        .catch { error ->
+            val fsError = generateSequence(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>()
+                .firstOrNull()
+            if (fsError == null && error is CancellationException) throw error
+            Log.w(TAG, "Pet playdates observer error", fsError ?: error)
+            emit(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
+    val worldFogState: StateFlow<WorldFogState> = combine(
+        heroProfileState,
+        hardcoreState,
+        todayPedometerSteps,
+        isHeroSleeping
+    ) { pState, hc, todaySteps, sleeping ->
+        val profile = (pState as? UiState.Success)?.data ?: HeroProfile()
+        ProgressionEngine.computeWorldFogState(
+            profile = profile,
+            hardcoreState = hc,
+            todaySteps = todaySteps,
+            isHeroSleeping = sleeping
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), WorldFogState())
+
+    val questStatuses: StateFlow<List<QuestStatus>> = combine(
+        heroProfileState,
+        todayPedometerSteps,
+        hardcoreState
+    ) { pState, todaySteps, hc ->
+        val profile = (pState as? UiState.Success)?.data ?: return@combine emptyList()
+        ProgressionEngine.evaluateQuests(profile, currentCalendarDateKey(), todaySteps, hc)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
     init {
         // Lock out the interactive Pet Arena Widget as soon as Solstride loads into foreground
@@ -499,6 +600,19 @@ class SolstrideViewModel(
                 }
             }
         }
+
+        // Live Sunhaven Plaza presence heartbeat every 45s while foregrounded
+        viewModelScope.launch {
+            while (isActive) {
+                if (_isForegroundActive.value) {
+                    val profile = (heroProfileState.value as? UiState.Success)?.data
+                    if (profile != null && profile.characterCreated) {
+                        publishTownPresenceNow(force = true)
+                    }
+                }
+                delay(45_000L)
+            }
+        }
     }
 
     fun openWidgetStudio(open: Boolean) {
@@ -535,7 +649,7 @@ class SolstrideViewModel(
     fun selectTabByRoute(route: String) {
         val matched = SolstrideTab.entries.firstOrNull { it.route.equals(route, ignoreCase = true) }
         if (matched != null) {
-            _activeTab.value = matched
+            selectTab(matched)
         }
     }
 
@@ -673,7 +787,12 @@ class SolstrideViewModel(
     }
 
     fun selectTab(tab: SolstrideTab) {
-        _activeTab.value = tab
+        if (tab == SolstrideTab.LEADERBOARD) {
+            _activeTab.value = SolstrideTab.MULTIPLAYER
+            _multiplayerSubTab.value = MultiplayerSubTab.RANKS
+        } else {
+            _activeTab.value = tab
+        }
     }
 
     fun selectBattleMode(mode: BattleMode) {
@@ -770,12 +889,16 @@ class SolstrideViewModel(
             refreshWatchSleepState()
             reconcilePedometerWithWatchState()
             syncWatchStepsCycle(refreshNode = false, silent = true)
+            publishTownPresenceNow(force = true)
         }
     }
 
     fun onBackgroundPaused() {
         _isForegroundActive.value = false
         BackgroundSyncGuard.setForeground(false)
+        viewModelScope.launch {
+            repository.leaveTownPresence(currentUserId)
+        }
         if (!isWatchConnected.value) {
             val latestBaseline = stepTracker.latestBaseline()
             if (latestBaseline >= 0L) {
@@ -796,6 +919,10 @@ class SolstrideViewModel(
         com.example.widget.SolstrideWidgetSnapshotStore.save(appContext, snap)
         com.example.widget.SolstrideWidgetSnapshotStore.setAppForegroundLocked(appContext, false)
         com.example.widget.WidgetAutoSyncScheduler.syncSchedule(appContext)
+    }
+
+    suspend fun cleanupBeforeSignOut() {
+        repository.leaveTownPresence(currentUserId)
     }
 
     fun wakeHeroFromSleep() {
@@ -851,7 +978,11 @@ class SolstrideViewModel(
                 preferences.updateHardcoreRpgState { hc ->
                     val nextWounds = (hc.battleWoundStacks - woundsCured).coerceAtLeast(0)
                     curedActual = (hc.battleWoundStacks - nextWounds).coerceAtLeast(0)
-                    hc.copy(battleWoundStacks = nextWounds)
+                    hc.copy(
+                        battleWoundStacks = nextWounds,
+                        restedClarityBattlesLeft = 3,
+                        restedClarityPct = sleepReward.sleepPercent.coerceIn(25, 100)
+                    )
                 }
                 repository.updateHeroProfile(
                     currentUserId,
@@ -866,7 +997,7 @@ class SolstrideViewModel(
                 val durLabel = if (hours > 0L) "${hours}h ${mins}m" else "${mins}m"
                 val woundNote = if (curedActual > 0) " & cured $curedActual Wound(s)" else ""
                 haptics.trigger(GameplayHaptic.VICTORY_FANFARE)
-                _bannerMessage.value = "🌙 Watch Sleep ($durLabel • ${sleepReward.sleepPercent}%)! +${sleepReward.solCoinsEarned} Sol Coins (max 50), +$hpGain HP, +$energyGain Energy$woundNote!"
+                _bannerMessage.value = "🌙 Watch Sleep ($durLabel • ${sleepReward.sleepPercent}%)! +${sleepReward.solCoinsEarned} Sol Coins (max 50), Rested Clarity (3 battles), +$hpGain HP, +$energyGain Energy$woundNote!"
             }
         }
     }
@@ -1145,6 +1276,16 @@ class SolstrideViewModel(
                 val watchDelta = acceptedBatches.filter { it.source != StepSource.PHONE.name }.sumOf { it.stepDelta }
                 if (watchDelta > 0L) {
                     preferences.recordDailyPedometerSteps(currentCalendarDateKey(), watchDelta)
+                }
+
+                // Real steps also dispel World Fog in the Hero's current Realm
+                val activeRealmKey = profile.currentRealm.toInt().coerceIn(1, ProgressionEngine.MAX_REALM.toInt()).toString()
+                preferences.updateHardcoreRpgState { hc ->
+                    val fogMap = hc.realmFogStepsMap.toMutableMap()
+                    val prevFogSteps = fogMap[activeRealmKey] ?: 0
+                    fogMap[activeRealmKey] = (prevFogSteps + totalDelta.toInt())
+                        .coerceAtMost(ProgressionEngine.REALM_FOG_FULL_CLEAR_STEPS)
+                    hc.copy(realmFogStepsMap = fogMap)
                 }
 
                 // Feed walked steps directly into Pet Arena Widget Wild Stamina & Step Treats
@@ -1544,30 +1685,39 @@ class SolstrideViewModel(
         dismissChestModal()
     }
 
-    // --- Class Skill Tree, Quests & Prestige Rebirth ---
+    // --- Class Skill Mastery (Unlock by Level, Upgrade with Sol Coins), Quests & Prestige Rebirth ---
 
     fun upgradeSkillNode(nodeIndex: Int) {
         val profile = (heroProfileState.value as? UiState.Success)?.data ?: return
         if (!requireCharacterAvailable(profile)) return
-        val spec = ProgressionEngine.skillNodes.getOrNull(nodeIndex) ?: return
-        if (profile.unspentPoints <= 0L) {
-            _bannerMessage.value = "Level up through battles, quests, or watch steps to earn Mastery Points."
+        val classSkills = ClassSkillCatalog.skillsFor(profile.resolvedClass())
+        val spec = classSkills.getOrNull(nodeIndex) ?: return
+
+        if (!spec.isUnlockedAt(profile.level.toInt())) {
+            _bannerMessage.value = "${spec.name} unlocks at Hero Level ${spec.unlockLevel} (currently Lv.${profile.level})."
             return
         }
-        val ranks = profile.parsedSkillRanks().toMutableList()
-        val currentRank = ranks.getOrElse(nodeIndex) { 0 }
+        val currentRank = ClassSkillCatalog.effectiveRank(profile, spec)
         if (currentRank >= spec.maxRank) {
-            _bannerMessage.value = "${spec.name} is already maxed (${spec.maxRank}/${spec.maxRank})."
+            _bannerMessage.value = "${spec.name} is already maxed (Rank ${spec.maxRank}/${spec.maxRank})."
             return
         }
-        ranks[nodeIndex] = currentRank + 1
+        val coinCost = ClassSkillCatalog.upgradeSolCoinCost(currentRank)
+        if (profile.solCoins < coinCost) {
+            _bannerMessage.value = "Need $coinCost Sol Coins to upgrade ${spec.name} to Rank ${currentRank + 1}. Complete Quests, Expeditions, or Watch Sleep!"
+            return
+        }
+
+        val ranks = profile.parsedSkillRanks().toMutableList()
+        ranks[nodeIndex] = (currentRank + 1).coerceAtMost(spec.maxRank)
         val serialized = ProgressionEngine.serializeSkillRanks(ranks)
+        val nextCoins = (profile.solCoins - coinCost).coerceAtLeast(0L)
         val updated = profile.copy(
             skillRanks = serialized,
-            unspentPoints = (profile.unspentPoints - 1L).coerceAtLeast(0L)
+            solCoins = nextCoins
         )
         val items = (inventoryState.value as? UiState.Success)?.data.orEmpty()
-        val stats = computeDerivedStats(updated, items, equippedPet.value)
+        val stats = computeDerivedStats(updated, items, equippedPet.value, hardcoreState.value)
         haptics.trigger(GameplayHaptic.VICTORY_FANFARE)
 
         viewModelScope.launch {
@@ -1575,7 +1725,7 @@ class SolstrideViewModel(
                 currentUserId,
                 mapOf(
                     "skillRanks" to serialized,
-                    "unspentPoints" to updated.unspentPoints,
+                    "solCoins" to nextCoins,
                     "maxHp" to stats.computedMaxHp.toLong(),
                     "currentHp" to updated.currentHp.coerceAtMost(stats.computedMaxHp.toLong()),
                     "maxStrideEnergy" to stats.computedMaxEnergy.toLong(),
@@ -1583,7 +1733,7 @@ class SolstrideViewModel(
                 )
             ).onSuccess {
                 syncLeaderboard(updated, updated.level, stats.computedHeroPower.toLong(), updated.bossesDefeated)
-                _bannerMessage.value = "Upgraded ${spec.name} to Rank ${currentRank + 1}/${spec.maxRank}!"
+                _bannerMessage.value = "Upgraded ${spec.name} to Rank ${currentRank + 1}/${spec.maxRank} (-$coinCost Sol Coins)!"
             }
         }
     }
@@ -1592,7 +1742,7 @@ class SolstrideViewModel(
         val profile = (heroProfileState.value as? UiState.Success)?.data ?: return
         if (!status.canClaim) return
         val items = (inventoryState.value as? UiState.Success)?.data.orEmpty()
-        val stats = computeDerivedStats(profile, items, equippedPet.value)
+        val ownedPets = (petsState.value as? UiState.Success)?.data.orEmpty()
         val todayKey = currentCalendarDateKey()
         val nextClaimed = ProgressionEngine.pruneAndAppendClaimedQuest(
             existingClaims = profile.claimedQuestIds,
@@ -1600,12 +1750,36 @@ class SolstrideViewModel(
             todayKey = todayKey,
             weekKey = profile.weekKey
         )
-        val leveled = applyXpAndLevelUp(profile, status.spec.xpReward, stats)
+        val rewardPet = status.spec.companionReward
+        val alreadyOwnsRewardPet = rewardPet != null &&
+            ownedPets.any { it.petType == rewardPet.name || it.id == rewardPet.name }
+        val shouldAdoptPet = rewardPet != null && !alreadyOwnsRewardPet
+        val autoEquipRewardPet = shouldAdoptPet && profile.equippedPetId.isBlank()
+        val nextEquippedPetId = if (autoEquipRewardPet && rewardPet != null) rewardPet.name else profile.equippedPetId
+        val activePetAfter = if (autoEquipRewardPet && rewardPet != null) {
+            OwnedPet(id = rewardPet.name, userId = currentUserId, petType = rewardPet.name)
+        } else {
+            equippedPet.value
+        }
+        val duplicatePetCoins = if (rewardPet != null && alreadyOwnsRewardPet) rewardPet.coinCost else 0L
+        val totalSolCoinsEarned = status.spec.solCoinReward + duplicatePetCoins
+
+        val profileForStats = profile.copy(equippedPetId = nextEquippedPetId)
+        val stats = computeDerivedStats(profileForStats, items, activePetAfter, hardcoreState.value)
+        val leveled = applyXpAndLevelUp(profileForStats, status.spec.xpReward, stats)
         val nextShards = (profile.sunshards + status.spec.sunshardReward).coerceAtMost(100_000_000L)
+        val nextSolCoins = (profile.solCoins + totalSolCoinsEarned).coerceAtMost(100_000_000L)
         val questChest = ProgressionEngine.buildQuestChest(currentUserId, profile, status.spec)
 
         haptics.trigger(GameplayHaptic.VICTORY_FANFARE)
         viewModelScope.launch {
+            if (shouldAdoptPet && rewardPet != null) {
+                val adoptRes = repository.adoptPet(currentUserId, rewardPet)
+                if (adoptRes.isFailure) {
+                    _bannerMessage.value = "Could not deliver quest companion — please retry."
+                    return@launch
+                }
+            }
             var savedChest: LootChest? = null
             if (questChest != null) {
                 val res = repository.addLootChest(currentUserId, questChest)
@@ -1615,28 +1789,41 @@ class SolstrideViewModel(
                 }
                 savedChest = res.getOrNull()
             }
-            repository.updateHeroProfile(
-                currentUserId,
-                mapOf(
-                    "claimedQuestIds" to nextClaimed,
-                    "sunshards" to nextShards,
-                    "level" to leveled.level,
-                    "xp" to leveled.xp,
-                    "xpToNextLevel" to leveled.xpToNextLevel,
-                    "unspentPoints" to leveled.unspentPoints,
-                    "maxHp" to leveled.maxHp,
-                    "currentHp" to leveled.currentHp,
-                    "heroPower" to leveled.heroPower
-                )
-            ).onSuccess {
-                syncLeaderboard(profile, leveled.level, leveled.heroPower, profile.bossesDefeated)
+            val updates = mutableMapOf<String, Any>(
+                "claimedQuestIds" to nextClaimed,
+                "sunshards" to nextShards,
+                "solCoins" to nextSolCoins,
+                "level" to leveled.level,
+                "xp" to leveled.xp,
+                "xpToNextLevel" to leveled.xpToNextLevel,
+                "unspentPoints" to leveled.unspentPoints,
+                "maxHp" to leveled.maxHp,
+                "currentHp" to leveled.currentHp,
+                "heroPower" to leveled.heroPower
+            )
+            if (autoEquipRewardPet) {
+                updates["equippedPetId"] = nextEquippedPetId
+            }
+            repository.updateHeroProfile(currentUserId, updates).onSuccess {
+                syncLeaderboard(profileForStats, leveled.level, leveled.heroPower, profile.bossesDefeated)
+                val coinTag = if (totalSolCoinsEarned > 0L) "+${totalSolCoinsEarned} Sol Coins, " else ""
+                val petTag = when {
+                    shouldAdoptPet && rewardPet != null -> {
+                        if (autoEquipRewardPet) " & Recruited + Equipped ${rewardPet.displayName}!"
+                        else " & Recruited Companion ${rewardPet.displayName}!"
+                    }
+                    alreadyOwnsRewardPet && rewardPet != null -> {
+                        " (Already own ${rewardPet.displayName} → +${duplicatePetCoins} Bonus Coins)"
+                    }
+                    else -> ""
+                }
                 if (savedChest != null) {
                     if (savedChest.id.isNotBlank()) recentlyAwardedChestIds.add(savedChest.id)
                     _lastOpenedChestResult.value = null
                     _pendingChestModal.value = savedChest
-                    _bannerMessage.value = "Quest Claimed! +${status.spec.sunshardReward} Sunshards, +${status.spec.xpReward} XP & Sealed Chest!"
+                    _bannerMessage.value = "Quest Claimed! ${coinTag}+${status.spec.sunshardReward} Sunshards, +${status.spec.xpReward} XP & Sealed Chest$petTag"
                 } else {
-                    _bannerMessage.value = "Quest Claimed! +${status.spec.sunshardReward} Sunshards & +${status.spec.xpReward} XP."
+                    _bannerMessage.value = "Quest Claimed! ${coinTag}+${status.spec.sunshardReward} Sunshards & +${status.spec.xpReward} XP$petTag"
                 }
             }
         }
@@ -1649,12 +1836,24 @@ class SolstrideViewModel(
             _bannerMessage.value = "Finish or retreat from your active battle before ascending."
             return
         }
-        if (!ProgressionEngine.canPrestige(profile)) {
-            _bannerMessage.value = "Reach Level ${ProgressionEngine.PRESTIGE_MIN_LEVEL} or clear Realm ${ProgressionEngine.PRESTIGE_ALT_REALM_CLEARED} to trigger Solar Ascension."
+        val prestigeEval = ProgressionEngine.evaluatePrestigeRequirements(profile)
+        if (prestigeEval.isMaxPrestigeReached) {
+            _bannerMessage.value = "You have reached the maximum Solar Ascension tier (Prestige ${ProgressionEngine.MAX_PRESTIGE_LEVEL})!"
             return
         }
-        val nextPrestige = (profile.prestigeLevel + 1L).coerceAtMost(ProgressionEngine.MAX_PRESTIGE_LEVEL)
+        if (!prestigeEval.allConditionsMet) {
+            val missing = prestigeEval.firstUnmetCondition
+            val detail = if (missing != null) {
+                "${missing.title} (${missing.currentValue}/${missing.targetValue})"
+            } else {
+                "complete all Trials of Solar Ascension"
+            }
+            _bannerMessage.value = "Prestige locked (${prestigeEval.metCount}/${prestigeEval.totalCount} trials met) — next required: $detail."
+            return
+        }
+        val nextPrestige = prestigeEval.nextPrestigeLevel.coerceAtMost(ProgressionEngine.MAX_PRESTIGE_LEVEL)
         val bonusPoints = 2L + nextPrestige
+        val remainingSolCoins = (profile.solCoins - prestigeEval.solCoinTributeCost).coerceAtLeast(0L)
         val reborn = profile.copy(
             prestigeLevel = nextPrestige,
             level = 1L,
@@ -1664,6 +1863,7 @@ class SolstrideViewModel(
             vigor = 5L,
             endurance = 5L,
             unspentPoints = bonusPoints,
+            solCoins = remainingSolCoins,
             currentRealm = 1L,
             realmStage = 1L
         )
@@ -1683,6 +1883,7 @@ class SolstrideViewModel(
                     "vigor" to 5L,
                     "endurance" to 5L,
                     "unspentPoints" to bonusPoints,
+                    "solCoins" to remainingSolCoins,
                     "currentRealm" to 1L,
                     "realmStage" to 1L,
                     "maxHp" to stats.computedMaxHp.toLong(),
@@ -1693,7 +1894,7 @@ class SolstrideViewModel(
             ).onSuccess {
                 syncLeaderboard(reborn, 1L, stats.computedHeroPower.toLong(), reborn.bossesDefeated)
                 val numeral = ProgressionEngine.prestigeRomanNumeral(nextPrestige.toInt())
-                _bannerMessage.value = "SOLAR ASCENSION $numeral! Permanent +${nextPrestige * 15}% All Stats, +${nextPrestige * 10}% XP/Shards & +${nextPrestige * 3}% Survival!"
+                _bannerMessage.value = "SOLAR ASCENSION $numeral! Offered ${prestigeEval.solCoinTributeCost} Sol Coins for permanent +${nextPrestige * 15}% All Stats, +${nextPrestige * 10}% XP/Shards & +${nextPrestige * 3}% Survival!"
             }
         }
     }
@@ -1794,12 +1995,66 @@ class SolstrideViewModel(
     }
 
     /**
-     * Pets can ONLY be fed and leveled up via the interactive Home Screen Pet Arena Widget
-     * while Solstride is closed. When the app opens, widget progress auto-syncs and the widget locks.
+     * Spend Sol Coins at the Town Pet Store or Companion Sanctuary to feed & level up your equipped pet.
      */
-    fun buyPetFood(@Suppress("UNUSED_PARAMETER") food: PetFoodSpec) {
-        haptics.trigger(GameplayHaptic.GUARD_BLOCK)
-        _bannerMessage.value = "Pets only level up on the Home Screen Pet Arena Widget while Solstride is closed! Pin the widget & close the app to Feed & Fight Wild Pets."
+    fun buyPetFood(food: PetFoodSpec) {
+        val profile = (heroProfileState.value as? UiState.Success)?.data ?: return
+        if (!requireCharacterAvailable(profile)) return
+        val activePet = equippedPet.value
+        if (activePet == null) {
+            _bannerMessage.value = "Adopt and equip a companion pet before buying ${food.name}."
+            return
+        }
+        if (activePet.level >= PetCatalog.MAX_PET_LEVEL) {
+            _bannerMessage.value = "${activePet.resolvedType().displayName} is already at max Level ${PetCatalog.MAX_PET_LEVEL}!"
+            return
+        }
+        if (profile.solCoins < food.coinCost) {
+            _bannerMessage.value = "Need ${food.coinCost} Sol Coins to feed ${food.name}. Earn Sol Coins from Quests, Bosses, or Sleep!"
+            return
+        }
+
+        val leveledPet = PetCatalog.applyFoodXp(activePet, food.xpGain)
+        val leveledUp = leveledPet.level > activePet.level
+        val nextCoins = (profile.solCoins - food.coinCost).coerceAtLeast(0L)
+        val items = (inventoryState.value as? UiState.Success)?.data.orEmpty()
+        val updatedProfile = profile.copy(solCoins = nextCoins)
+        val stats = computeDerivedStats(updatedProfile, items, leveledPet)
+
+        haptics.trigger(if (leveledUp) GameplayHaptic.VICTORY_FANFARE else GameplayHaptic.SYNC_CONFIRM)
+        viewModelScope.launch {
+            val petDocId = activePet.id.ifBlank { activePet.petType }
+            val petRes = repository.updateOwnedPet(
+                currentUserId,
+                petDocId,
+                mapOf(
+                    "level" to leveledPet.level,
+                    "xp" to leveledPet.xp,
+                    "xpToNextLevel" to leveledPet.xpToNextLevel
+                )
+            )
+            if (petRes.isFailure) {
+                _bannerMessage.value = "Could not feed ${activePet.resolvedType().displayName}: check connection."
+                return@launch
+            }
+            repository.updateHeroProfile(
+                currentUserId,
+                mapOf(
+                    "solCoins" to nextCoins,
+                    "maxHp" to stats.computedMaxHp.toLong(),
+                    "maxStrideEnergy" to stats.computedMaxEnergy.toLong(),
+                    "heroPower" to stats.computedHeroPower.toLong()
+                )
+            )
+            syncLeaderboard(updatedProfile, updatedProfile.level, stats.computedHeroPower.toLong(), updatedProfile.bossesDefeated)
+            publishTownPresenceNow(force = true, overrideProfile = updatedProfile)
+            val petName = activePet.resolvedType().displayName
+            _bannerMessage.value = if (leveledUp) {
+                "Fed $petName ${food.name} (-${food.coinCost} Coins) — LEVEL UP to Lv.${leveledPet.level}!"
+            } else {
+                "Fed $petName ${food.name} (-${food.coinCost} Coins, +${food.xpGain} Pet XP)!"
+            }
+        }
     }
 
     fun buyPetGear(gear: PetGearSpec) {
@@ -1898,6 +2153,11 @@ class SolstrideViewModel(
     fun performSolarSkill() = runBattleTurn { battle, profile, stats ->
         haptics.trigger(GameplayHaptic.SOLAR_CRITICAL)
         CombatEngine.executeSolarSkill(battle, profile, stats)
+    }
+
+    fun performClassActiveSkill(skillIndex: Int) = runBattleTurn { battle, profile, stats ->
+        haptics.trigger(GameplayHaptic.SOLAR_CRITICAL)
+        CombatEngine.executeClassActiveSkill(skillIndex, battle, profile, stats)
     }
 
     fun performUltimateAndPetCombo() = runBattleTurn { battle, profile, stats ->
@@ -2001,6 +2261,8 @@ class SolstrideViewModel(
                     }
                     val nextMercLeft = (hc.mercenaryBattlesLeft - 1).coerceAtLeast(0)
                     val nextShrineLeft = (hc.shrineBattlesLeft - 1).coerceAtLeast(0)
+                    val nextRestedLeft = (hc.restedClarityBattlesLeft - 1).coerceAtLeast(0)
+                    val nextLanternLeft = (hc.fogLanternCharges - 1).coerceAtLeast(0)
 
                     hc.copy(
                         sunsteelOre = (hc.sunsteelOre + outcome.oreEarned).coerceAtMost(999_999L),
@@ -2011,6 +2273,9 @@ class SolstrideViewModel(
                         mercenaryContractId = if (nextMercLeft == 0) "" else hc.mercenaryContractId,
                         shrineBattlesLeft = nextShrineLeft,
                         shrineBlessingLabel = if (nextShrineLeft == 0) "" else hc.shrineBlessingLabel,
+                        restedClarityBattlesLeft = nextRestedLeft,
+                        restedClarityPct = if (nextRestedLeft == 0) 0 else hc.restedClarityPct,
+                        fogLanternCharges = nextLanternLeft,
                         itemDurabilityMap = nextDurability,
                         bestiaryDefeatsMap = nextBestiary,
                         unlockedRunesMap = nextRunes
@@ -2243,7 +2508,7 @@ class SolstrideViewModel(
                         )
                         _bannerMessage.value = "Altar Jackpot! Won +$winCoins Sol Coins & a ${rune.label} Rune!"
                     } else {
-                        nextShards = (nextShards + 95L).coerceAtMost(100_000_000L)
+                        nextShards = (nextShards + 40L).coerceAtMost(100_000_000L)
                         val bruisedHp = (profile.currentHp - (profile.maxHp * 0.20f).toLong()).coerceAtLeast(15L)
                         preferences.updateHardcoreRpgState { hc ->
                             hc.copy(elementalEssence = (hc.elementalEssence + 3L).coerceAtMost(999_999L))
@@ -2257,7 +2522,7 @@ class SolstrideViewModel(
                                 "currentHp" to bruisedHp
                             )
                         )
-                        _bannerMessage.value = "Altar Backlash (-20% HP): Claimed +95 Sunshards & +3 Elemental Essence."
+                        _bannerMessage.value = "Altar Backlash (-20% HP): Claimed +40 Sunshards & +3 Elemental Essence."
                     }
                 }
             }
@@ -2507,7 +2772,8 @@ class SolstrideViewModel(
     fun forgeCustomEquipment(
         slot: ItemSlot,
         tier: ForgeBlueprintTier,
-        chosenElement: ElementalAffinity? = null
+        chosenElement: ElementalAffinity? = null,
+        useStarforgedIngot: Boolean = false
     ) {
         val profile = (heroProfileState.value as? UiState.Success)?.data ?: return
         if (!requireCharacterAvailable(profile)) return
@@ -2517,6 +2783,10 @@ class SolstrideViewModel(
             return
         }
         val hc = hardcoreState.value
+        if (useStarforgedIngot && hc.starforgedIngots <= 0L) {
+            _bannerMessage.value = "No Starforged Masterwork Ingots owned. Buy one from the Rare Materials Market in Sunhaven Plaza!"
+            return
+        }
         val essenceCost = tier.essenceCost + if (chosenElement != null) 4L else 0L
         if (hc.sunsteelOre < tier.oreCost ||
             hc.aetherHerbs < tier.herbCost ||
@@ -2532,7 +2802,8 @@ class SolstrideViewModel(
             slot = slot,
             tier = tier,
             heroLevel = profile.level.toInt(),
-            chosenElement = chosenElement
+            chosenElement = chosenElement,
+            guaranteedMasterwork = useStarforgedIngot
         )
 
         haptics.trigger(GameplayHaptic.VICTORY_FANFARE)
@@ -2546,14 +2817,19 @@ class SolstrideViewModel(
                 cur.copy(
                     sunsteelOre = (cur.sunsteelOre - tier.oreCost).coerceAtLeast(0L),
                     aetherHerbs = (cur.aetherHerbs - tier.herbCost).coerceAtLeast(0L),
-                    elementalEssence = (cur.elementalEssence - essenceCost).coerceAtLeast(0L)
+                    elementalEssence = (cur.elementalEssence - essenceCost).coerceAtLeast(0L),
+                    starforgedIngots = if (useStarforgedIngot) (cur.starforgedIngots - 1L).coerceAtLeast(0L) else cur.starforgedIngots
                 )
             }
             repository.updateHeroProfile(
                 currentUserId,
                 mapOf("sunshards" to (profile.sunshards - tier.sunshardCost).coerceAtLeast(0L))
             )
-            val critNote = if (forged.resolvedRarity() != tier.baseRarity) " ★ MASTERWORK CRIT!" else ""
+            val critNote = when {
+                useStarforgedIngot -> " ★ STARFORGED MASTERWORK!"
+                forged.resolvedRarity() != tier.baseRarity -> " ★ MASTERWORK CRIT!"
+                else -> ""
+            }
             _bannerMessage.value = "🔨 Forged ${forged.name} (${forged.resolvedRarity().label} ${slot.label})$critNote — Equip in Gear Bag!"
         }
     }
@@ -3000,10 +3276,10 @@ class SolstrideViewModel(
                         currentUserId,
                         mapOf(
                             "solCoins" to nextCoins,
-                            "sunshards" to (profile.sunshards + 120L).coerceAtMost(100_000_000L)
+                            "sunshards" to (profile.sunshards + 50L).coerceAtMost(100_000_000L)
                         )
                     )
-                    _bannerMessage.value = "Unlocked Supply Crate (+35 Ore, +28 Herbs, +10 Essence & +120 Sunshards)!"
+                    _bannerMessage.value = "Unlocked Supply Crate (+35 Ore, +28 Herbs, +10 Essence & +50 Sunshards)!"
                 }
                 "royal_physician_cure", "bm_physician_full_cure" -> {
                     var nextHc = hardcoreState.value
@@ -3058,6 +3334,618 @@ class SolstrideViewModel(
         }
     }
 
+    // --- Character Creator Studio & Sunhaven Plaza Multiplayer Town ---
+
+    fun openCharacterMirror() {
+        _showCharacterStudio.value = true
+    }
+
+    fun dismissCharacterStudio() {
+        val profile = (heroProfileState.value as? UiState.Success)?.data
+        if (profile != null && profile.characterCreated) {
+            _showCharacterStudio.value = false
+        }
+    }
+
+    fun completeCharacterCreation(
+        rawName: String,
+        heroClass: HeroClass,
+        avatarConfig: HeroAvatarConfig,
+        isInitialCreation: Boolean
+    ) {
+        val profile = (heroProfileState.value as? UiState.Success)?.data ?: return
+        val cleanName = rawName.trim().replace(Regex("\\s+"), " ").take(24)
+        if (cleanName.length < 2) {
+            _bannerMessage.value = "Enter a Hero Name (2 to 24 characters)."
+            return
+        }
+        val serializedAvatar = avatarConfig.normalized().serialize()
+        val defaultSpec = ClassSpecialization.forClass(heroClass).first()
+        val ranks = profile.parsedSkillRanks().toMutableList()
+        if (ranks[0] < 1) ranks[0] = 1
+        val serializedRanks = ProgressionEngine.serializeSkillRanks(ranks)
+
+        haptics.trigger(GameplayHaptic.VICTORY_FANFARE)
+        viewModelScope.launch {
+            var nextHc = hardcoreState.value
+            if (ClassSpecialization.fromName(nextHc.specializationId, heroClass).baseClass != heroClass) {
+                preferences.updateHardcoreRpgState { hc ->
+                    hc.copy(specializationId = defaultSpec.name).also { nextHc = it }
+                }
+            }
+            val items = (inventoryState.value as? UiState.Success)?.data.orEmpty()
+            val updated = profile.copy(
+                displayName = cleanName,
+                heroClass = heroClass.name,
+                avatarConfig = serializedAvatar,
+                characterCreated = true,
+                skillRanks = serializedRanks
+            )
+            val stats = computeDerivedStats(updated, items, equippedPet.value, nextHc)
+            val res = repository.updateHeroProfile(
+                currentUserId,
+                mapOf(
+                    "displayName" to cleanName,
+                    "heroClass" to heroClass.name,
+                    "avatarConfig" to serializedAvatar,
+                    "characterCreated" to true,
+                    "skillRanks" to serializedRanks,
+                    "maxHp" to stats.computedMaxHp.toLong(),
+                    "currentHp" to updated.currentHp.coerceAtMost(stats.computedMaxHp.toLong()),
+                    "maxStrideEnergy" to stats.computedMaxEnergy.toLong(),
+                    "heroPower" to stats.computedHeroPower.toLong()
+                )
+            )
+            if (res.isSuccess) {
+                // Rename starter weapon cleanly on initial creation to match chosen class
+                if (isInitialCreation) {
+                    val starter = items.firstOrNull { it.id == "starter_sunblade" }
+                    if (starter != null) {
+                        val starterName = when (heroClass) {
+                            HeroClass.VANGUARD -> "Sunforged Practice Blade"
+                            HeroClass.ARCANIST -> "Weathered Ember Staff"
+                            HeroClass.RANGER -> "Highland Yew Shortbow"
+                            HeroClass.SHADOWBLADE -> "Twin Eclipse Daggers"
+                        }
+                        repository.updateInventoryItem(currentUserId, starter.id, mapOf("name" to starterName))
+                    }
+                }
+                syncLeaderboard(updated, updated.level, stats.computedHeroPower.toLong(), updated.bossesDefeated)
+                _showCharacterStudio.value = false
+                publishTownPresenceNow(force = true, overrideProfile = updated)
+                _bannerMessage.value = if (isInitialCreation) {
+                    "Welcome to Sunhaven, $cleanName the ${heroClass.title}!"
+                } else {
+                    "Updated hero appearance & identity for $cleanName!"
+                }
+            } else {
+                _bannerMessage.value = "Could not save hero profile — check connection and try again."
+            }
+        }
+    }
+
+    fun openTownNpc(role: TownNpcRole?) {
+        _selectedTownNpc.value = role
+        if (role != null) {
+            haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
+        }
+    }
+
+    fun visitTownNpc(role: TownNpcRole) {
+        selectTab(SolstrideTab.EXPEDITION)
+        openTownNpc(role)
+    }
+
+    fun inspectTownPlayer(player: TownPresencePlayer?) {
+        _inspectedTownPlayer.value = player
+        if (player != null) {
+            haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
+        }
+    }
+
+    fun walkToTownPosition(targetX: Float, targetY: Float) {
+        val clampedX = targetX.coerceIn(0.08f, 0.92f)
+        val clampedY = targetY.coerceIn(0.24f, 0.88f)
+        val prevX = _localTownPos.value.first
+        if (kotlin.math.abs(clampedX - prevX) > 0.01f) {
+            _localTownFacingRight.value = clampedX >= prevX
+        }
+        _localTownPos.value = clampedX to clampedY
+        viewModelScope.launch {
+            publishTownPresenceNow(force = false)
+        }
+    }
+
+    fun sendTownEmote(emote: String) {
+        val clean = emote.trim().take(30)
+        _localTownEmote.value = clean
+        haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
+        viewModelScope.launch {
+            publishTownPresenceNow(force = true)
+            delay(5_000L)
+            if (_localTownEmote.value == clean) {
+                _localTownEmote.value = ""
+                publishTownPresenceNow(force = true)
+            }
+        }
+    }
+
+    private suspend fun publishTownPresenceNow(
+        force: Boolean,
+        overrideProfile: HeroProfile? = null
+    ) {
+        val now = System.currentTimeMillis()
+        if (!force && (now - lastTownPresenceSyncMs) < 600L) return
+        val profile = overrideProfile ?: (heroProfileState.value as? UiState.Success)?.data ?: return
+        if (!profile.characterCreated) return
+        lastTownPresenceSyncMs = now
+        val (px, py) = _localTownPos.value
+        val presence = TownPresencePlayer(
+            id = currentUserId,
+            userId = currentUserId,
+            displayName = profile.displayName,
+            heroClass = profile.resolvedClass().name,
+            heroLevel = profile.level.coerceAtLeast(1L),
+            heroPower = profile.heroPower.coerceAtLeast(1L),
+            prestigeLevel = profile.prestigeLevel.coerceAtLeast(0L),
+            avatarConfig = profile.resolvedAvatar().serialize(),
+            equippedPetId = profile.equippedPetId,
+            equippedPetLevel = equippedPet.value?.level?.coerceIn(1L, 50L) ?: 1L,
+            posX = px.toDouble(),
+            posY = py.toDouble(),
+            facingRight = _localTownFacingRight.value,
+            emote = _localTownEmote.value,
+            inTown = true
+        )
+        repository.upsertTownPresence(currentUserId, presence)
+    }
+
+    // --- Dedicated Multiplayer Tab Actions (Chat, PvP Duels, Pet Playdates) ---
+
+    fun selectMultiplayerSubTab(tab: MultiplayerSubTab) {
+        _multiplayerSubTab.value = tab
+    }
+
+    fun sendMultiplayerChat(rawMessage: String) {
+        val profile = (heroProfileState.value as? UiState.Success)?.data ?: return
+        val clean = rawMessage.trim().take(240)
+        if (clean.isEmpty()) return
+        haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
+        viewModelScope.launch {
+            repository.sendMultiplayerChatMessage(currentUserId, profile, clean)
+                .onFailure { err ->
+                    _bannerMessage.value = "Could not send message: ${err.localizedMessage ?: "check connection"}"
+                }
+        }
+    }
+
+    fun deleteMultiplayerChat(messageId: String) {
+        if (messageId.isBlank()) return
+        haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
+        viewModelScope.launch {
+            repository.deleteMultiplayerChatMessage(currentUserId, messageId)
+                .onFailure { err ->
+                    _bannerMessage.value = "Unable to delete message: ${err.localizedMessage ?: "retry"}"
+                }
+        }
+    }
+
+    fun challengePlayerToDuel(opponent: TownPresencePlayer) {
+        val profile = (heroProfileState.value as? UiState.Success)?.data ?: return
+        val oppUid = opponent.userId.ifBlank { opponent.id }
+        if (oppUid.isBlank() || oppUid == currentUserId) return
+
+        val existing = multiplayerDuels.value.firstOrNull { duel ->
+            duel.status in setOf("PENDING", "ACTIVE") &&
+                oppUid in duel.participantUids &&
+                currentUserId in duel.participantUids
+        }
+        if (existing != null) {
+            _activeTab.value = SolstrideTab.MULTIPLAYER
+            _multiplayerSubTab.value = MultiplayerSubTab.DUELS
+            _bannerMessage.value = "You already have a ${existing.status.lowercase()} duel with ${opponent.displayName}!"
+            return
+        }
+
+        val stats = derivedStats.value
+        val challengerMaxHp = (stats?.computedMaxHp?.toLong() ?: profile.maxHp).coerceIn(100L, 1_000_000L)
+        val challengerPower = (stats?.computedHeroPower?.toLong() ?: profile.heroPower).coerceIn(1L, 10_000_000L)
+        haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
+
+        viewModelScope.launch {
+            repository.createDuelChallenge(
+                userId = currentUserId,
+                challenger = profile,
+                challengerMaxHp = challengerMaxHp,
+                challengerPower = challengerPower,
+                opponent = opponent
+            ).onSuccess {
+                _inspectedTownPlayer.value = null
+                _activeTab.value = SolstrideTab.MULTIPLAYER
+                _multiplayerSubTab.value = MultiplayerSubTab.DUELS
+                _bannerMessage.value = "Duel challenge sent to ${opponent.displayName}!"
+            }.onFailure { err ->
+                _bannerMessage.value = "Failed to send duel challenge: ${err.localizedMessage ?: "retry"}"
+            }
+        }
+    }
+
+    fun acceptDuel(duel: MultiplayerDuel) {
+        if (duel.id.isBlank() || duel.status != "PENDING" || duel.opponentUid != currentUserId) return
+        haptics.trigger(GameplayHaptic.VICTORY_FANFARE)
+        viewModelScope.launch {
+            val updates = mapOf<String, Any>(
+                "status" to "ACTIVE",
+                "turnUid" to duel.challengerUid,
+                "turnNumber" to 1L,
+                "lastActionLog" to "${duel.opponentName} accepted the Solar Duel! ${duel.challengerName}'s turn.".take(240)
+            )
+            repository.updateDuelState(currentUserId, duel.id, updates)
+                .onSuccess {
+                    _bannerMessage.value = "Duel started against ${duel.challengerName}!"
+                }
+                .onFailure { err ->
+                    _bannerMessage.value = "Could not accept duel: ${err.localizedMessage ?: "retry"}"
+                }
+        }
+    }
+
+    fun declineOrCancelDuel(duel: MultiplayerDuel) {
+        if (duel.id.isBlank() || duel.status != "PENDING") return
+        val isChallenger = duel.challengerUid == currentUserId
+        haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
+        viewModelScope.launch {
+            val actorName = if (isChallenger) duel.challengerName else duel.opponentName
+            val updates = mapOf<String, Any>(
+                "status" to "DECLINED",
+                "lastActionLog" to if (isChallenger) {
+                    "$actorName withdrew the duel challenge."
+                } else {
+                    "$actorName declined the duel challenge."
+                }.take(240)
+            )
+            repository.updateDuelState(currentUserId, duel.id, updates)
+                .onFailure { err ->
+                    _bannerMessage.value = "Could not update duel: ${err.localizedMessage ?: "retry"}"
+                }
+        }
+    }
+
+    fun performDuelAction(duel: MultiplayerDuel, action: DuelActionKind) {
+        if (duel.id.isBlank() || duel.status != "ACTIVE") return
+        if (duel.turnUid != currentUserId) {
+            _bannerMessage.value = "Wait for your opponent to take their turn!"
+            return
+        }
+
+        val isChallengerTurn = currentUserId == duel.challengerUid
+        val attackerName = if (isChallengerTurn) duel.challengerName else duel.opponentName
+        val defenderName = if (isChallengerTurn) duel.opponentName else duel.challengerName
+        val attackerPower = if (isChallengerTurn) duel.challengerPower else duel.opponentPower
+        val attackerLevel = if (isChallengerTurn) duel.challengerLevel else duel.opponentLevel
+        val attackerPet = if (isChallengerTurn) duel.resolvedChallengerPet() else duel.resolvedOpponentPet()
+        val attackerHp = if (isChallengerTurn) duel.challengerHp else duel.opponentHp
+        val attackerMaxHp = (if (isChallengerTurn) duel.challengerMaxHp else duel.opponentMaxHp).coerceAtLeast(1L)
+
+        val defenderHp = if (isChallengerTurn) duel.opponentHp else duel.challengerHp
+        val defenderMaxHp = (if (isChallengerTurn) duel.opponentMaxHp else duel.challengerMaxHp).coerceAtLeast(1L)
+        val defenderGuarding = if (isChallengerTurn) duel.opponentGuard else duel.challengerGuard
+
+        val nextTurnUid = if (isChallengerTurn) duel.opponentUid else duel.challengerUid
+        val nextTurnNumber = (duel.turnNumber + 1L).coerceAtMost(500L)
+
+        // Balanced PvP scaling so duels last an exciting 4-8 tactical turns
+        val baseAttack = (18.0 + attackerLevel * 3.8 + attackerPower * 0.085)
+        val petBonus = if (attackerPet != null) 1.08 else 1.0
+        val variance = Random.nextDouble(0.92, 1.09)
+
+        var newAttackerHp = attackerHp
+        var newDefenderHp = defenderHp
+        var newAttackerGuard = false
+        val newDefenderGuard = false // Defender's guard is consumed or expires when attacked/passed
+        val logText: String
+
+        when (action) {
+            DuelActionKind.STRIKE -> {
+                var dmg = (baseAttack * petBonus * variance).roundToInt().toLong().coerceAtLeast(12L)
+                if (defenderGuarding) dmg = (dmg * 0.55).roundToInt().toLong().coerceAtLeast(6L)
+                newDefenderHp = (defenderHp - dmg).coerceAtLeast(0L)
+                val petNote = if (attackerPet != null) " (${attackerPet.displayName} assisted!)" else ""
+                val guardNote = if (defenderGuarding) " [Guarded]" else ""
+                logText = "$attackerName used Solar Strike on $defenderName for $dmg dmg$guardNote!$petNote"
+            }
+            DuelActionKind.CLASS_ART -> {
+                var dmg = (baseAttack * 1.38 * petBonus * variance).roundToInt().toLong().coerceAtLeast(18L)
+                if (defenderGuarding) dmg = (dmg * 0.55).roundToInt().toLong().coerceAtLeast(9L)
+                val leech = (attackerMaxHp * 0.08).roundToInt().toLong().coerceAtLeast(6L)
+                newDefenderHp = (defenderHp - dmg).coerceAtLeast(0L)
+                newAttackerHp = (attackerHp + leech).coerceAtMost(attackerMaxHp)
+                val guardNote = if (defenderGuarding) " [Guarded]" else ""
+                logText = "$attackerName unleashed Class Art for $dmg dmg$guardNote and recovered +$leech HP!"
+            }
+            DuelActionKind.GUARD -> {
+                val heal = (attackerMaxHp * 0.14).roundToInt().toLong().coerceAtLeast(10L)
+                newAttackerHp = (attackerHp + heal).coerceAtMost(attackerMaxHp)
+                newAttackerGuard = true
+                logText = "$attackerName raised Aegis Guard (-45% next hit) and restored +$heal HP!"
+            }
+        }
+
+        val won = newDefenderHp <= 0L
+        val nextStatus = if (won) "COMPLETED" else "ACTIVE"
+        val winnerUid = if (won) currentUserId else ""
+        val finalLog = if (won) {
+            "$logText $attackerName won the Solar Duel!"
+        } else {
+            logText
+        }.take(240)
+
+        val nextChallengerHp = (if (isChallengerTurn) newAttackerHp else newDefenderHp).coerceIn(0L, duel.challengerMaxHp)
+        val nextOpponentHp = (if (isChallengerTurn) newDefenderHp else newAttackerHp).coerceIn(0L, duel.opponentMaxHp)
+        val nextChallengerGuard = if (isChallengerTurn) newAttackerGuard else newDefenderGuard
+        val nextOpponentGuard = if (isChallengerTurn) newDefenderGuard else newAttackerGuard
+
+        haptics.trigger(if (won) GameplayHaptic.VICTORY_FANFARE else GameplayHaptic.PLAYER_STRIKE)
+
+        viewModelScope.launch {
+            val updates = mapOf<String, Any>(
+                "challengerHp" to nextChallengerHp,
+                "challengerGuard" to nextChallengerGuard,
+                "opponentHp" to nextOpponentHp,
+                "opponentGuard" to nextOpponentGuard,
+                "status" to nextStatus,
+                "turnUid" to nextTurnUid,
+                "turnNumber" to nextTurnNumber,
+                "winnerUid" to winnerUid,
+                "lastActionLog" to finalLog
+            )
+            repository.updateDuelState(currentUserId, duel.id, updates)
+                .onSuccess {
+                    if (won && claimedDuelRewardIds.add(duel.id)) {
+                        awardFriendlyDuelHonor(defenderName)
+                    }
+                }
+                .onFailure { err ->
+                    _bannerMessage.value = "Duel action failed: ${err.localizedMessage ?: "retry"}"
+                }
+        }
+    }
+
+    private suspend fun awardFriendlyDuelHonor(defeatedName: String) {
+        val profile = (heroProfileState.value as? UiState.Success)?.data ?: return
+        val stats = derivedStats.value ?: return
+        val leveled = applyXpAndLevelUp(profile, 35L, stats)
+        val nextCoins = (profile.solCoins + 5L).coerceAtMost(100_000_000L)
+        repository.updateHeroProfile(
+            currentUserId,
+            mapOf(
+                "solCoins" to nextCoins,
+                "level" to leveled.level,
+                "xp" to leveled.xp,
+                "xpToNextLevel" to leveled.xpToNextLevel,
+                "unspentPoints" to leveled.unspentPoints,
+                "maxHp" to leveled.maxHp,
+                "currentHp" to leveled.currentHp,
+                "heroPower" to leveled.heroPower
+            )
+        )
+        _bannerMessage.value = "Victory over $defeatedName! Friendly Duel Honor: +5 Sol Coins & +35 XP!"
+    }
+
+    fun forfeitDuel(duel: MultiplayerDuel) {
+        if (duel.id.isBlank() || duel.status != "ACTIVE") return
+        val isChallenger = currentUserId == duel.challengerUid
+        val otherUid = if (isChallenger) duel.opponentUid else duel.challengerUid
+        val actorName = if (isChallenger) duel.challengerName else duel.opponentName
+        haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
+        viewModelScope.launch {
+            val updates = mapOf<String, Any>(
+                "status" to "COMPLETED",
+                "winnerUid" to otherUid,
+                "lastActionLog" to "$actorName yielded the Solar Duel with honor.".take(240)
+            )
+            repository.updateDuelState(currentUserId, duel.id, updates)
+                .onFailure { err ->
+                    _bannerMessage.value = "Could not forfeit duel: ${err.localizedMessage ?: "retry"}"
+                }
+        }
+    }
+
+    fun dismissDuel(duel: MultiplayerDuel) {
+        if (duel.id.isBlank() || duel.status !in setOf("COMPLETED", "DECLINED")) return
+        haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
+        viewModelScope.launch {
+            repository.deleteDuel(currentUserId, duel.id)
+                .onFailure { err ->
+                    _bannerMessage.value = "Could not dismiss duel: ${err.localizedMessage ?: "retry"}"
+                }
+        }
+    }
+
+    fun invitePetPlaydate(guestPlayer: TownPresencePlayer) {
+        val profile = (heroProfileState.value as? UiState.Success)?.data ?: return
+        val myPet = equippedPet.value
+        if (myPet == null) {
+            _bannerMessage.value = "Equip a Companion Pet in the Pets tab before starting a Pet Playdate!"
+            return
+        }
+        val guestPet = guestPlayer.resolvedPetType()
+        if (guestPet == null) {
+            _bannerMessage.value = "${guestPlayer.displayName} doesn't have an equipped companion pet right now."
+            return
+        }
+        val guestUid = guestPlayer.userId.ifBlank { guestPlayer.id }
+        if (guestUid.isBlank() || guestUid == currentUserId) return
+
+        val existing = multiplayerPetPlaydates.value.firstOrNull { playdate ->
+            playdate.status in setOf("PENDING", "PLAYING") &&
+                guestUid in playdate.participantUids &&
+                currentUserId in playdate.participantUids
+        }
+        if (existing != null) {
+            _activeTab.value = SolstrideTab.MULTIPLAYER
+            _multiplayerSubTab.value = MultiplayerSubTab.PET_PLAY
+            _bannerMessage.value = "Your pets already have an active playdate with ${guestPlayer.displayName}!"
+            return
+        }
+
+        haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
+        viewModelScope.launch {
+            repository.createPetPlaydate(
+                userId = currentUserId,
+                hostProfile = profile,
+                hostPet = myPet,
+                guestPlayer = guestPlayer
+            ).onSuccess {
+                _inspectedTownPlayer.value = null
+                _activeTab.value = SolstrideTab.MULTIPLAYER
+                _multiplayerSubTab.value = MultiplayerSubTab.PET_PLAY
+                _bannerMessage.value = "Invited ${guestPlayer.displayName}'s ${guestPet.displayName} to play in the Pet Park!"
+            }.onFailure { err ->
+                _bannerMessage.value = "Could not send playdate invite: ${err.localizedMessage ?: "retry"}"
+            }
+        }
+    }
+
+    fun acceptPetPlaydate(playdate: MultiplayerPetPlaydate) {
+        if (playdate.id.isBlank() || playdate.status != "PENDING" || playdate.guestUid != currentUserId) return
+        haptics.trigger(GameplayHaptic.VICTORY_FANFARE)
+        viewModelScope.launch {
+            val hostPet = playdate.resolvedHostPet().displayName
+            val guestPet = playdate.resolvedGuestPet().displayName
+            val updates = mapOf<String, Any>(
+                "status" to "PLAYING",
+                "activity" to PetPlayActivity.CHASE.id,
+                "playCount" to 1L,
+                "happinessBonus" to 12L,
+                "lastPlayLog" to "$guestPet joined $hostPet in the Sunhaven Pet Park!".take(240)
+            )
+            repository.updatePetPlaydate(currentUserId, playdate.id, updates)
+                .onSuccess {
+                    _bannerMessage.value = "$guestPet and $hostPet are now playing together!"
+                }
+                .onFailure { err ->
+                    _bannerMessage.value = "Could not accept playdate: ${err.localizedMessage ?: "retry"}"
+                }
+        }
+    }
+
+    fun declineOrCancelPetPlaydate(playdate: MultiplayerPetPlaydate) {
+        if (playdate.id.isBlank() || playdate.status != "PENDING") return
+        val isHost = playdate.hostUid == currentUserId
+        haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
+        viewModelScope.launch {
+            val actor = if (isHost) playdate.hostName else playdate.guestName
+            val updates = mapOf<String, Any>(
+                "status" to "DECLINED",
+                "lastPlayLog" to if (isHost) "$actor cancelled the playdate invite." else "$actor declined the playdate invite."
+            )
+            repository.updatePetPlaydate(currentUserId, playdate.id, updates)
+                .onFailure { err ->
+                    _bannerMessage.value = "Could not update playdate: ${err.localizedMessage ?: "retry"}"
+                }
+        }
+    }
+
+    fun triggerPetPlayActivity(playdate: MultiplayerPetPlaydate, activity: PetPlayActivity) {
+        if (playdate.id.isBlank() || playdate.status != "PLAYING") return
+        val nextCount = (playdate.playCount + 1L).coerceAtMost(50L)
+        val nextHappiness = (playdate.happinessBonus + 12L).coerceAtMost(100L)
+        val hostPet = playdate.resolvedHostPet().displayName
+        val guestPet = playdate.resolvedGuestPet().displayName
+        val log = "$hostPet & $guestPet ${activity.verbSummary}".take(240)
+        haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
+        viewModelScope.launch {
+            val updates = mapOf<String, Any>(
+                "activity" to activity.id,
+                "playCount" to nextCount,
+                "happinessBonus" to nextHappiness,
+                "lastPlayLog" to log
+            )
+            repository.updatePetPlaydate(currentUserId, playdate.id, updates)
+                .onFailure { err ->
+                    _bannerMessage.value = "Could not update play activity: ${err.localizedMessage ?: "retry"}"
+                }
+        }
+    }
+
+    fun finishPetPlaydate(playdate: MultiplayerPetPlaydate) {
+        if (playdate.id.isBlank() || playdate.status != "PLAYING") return
+        val hostPet = playdate.resolvedHostPet().displayName
+        val guestPet = playdate.resolvedGuestPet().displayName
+        haptics.trigger(GameplayHaptic.VICTORY_FANFARE)
+        viewModelScope.launch {
+            val updates = mapOf<String, Any>(
+                "status" to "FINISHED",
+                "lastPlayLog" to "$hostPet & $guestPet wrapped up their playdate with +${playdate.happinessBonus}% joyful spirit!".take(240)
+            )
+            repository.updatePetPlaydate(currentUserId, playdate.id, updates)
+                .onSuccess {
+                    _bannerMessage.value = "Playdate finished! Pets bonded (+${playdate.happinessBonus}% Happiness)."
+                }
+                .onFailure { err ->
+                    _bannerMessage.value = "Could not finish playdate: ${err.localizedMessage ?: "retry"}"
+                }
+        }
+    }
+
+    fun dismissPetPlaydate(playdate: MultiplayerPetPlaydate) {
+        if (playdate.id.isBlank() || playdate.status !in setOf("FINISHED", "DECLINED")) return
+        haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
+        viewModelScope.launch {
+            repository.deletePetPlaydate(currentUserId, playdate.id)
+                .onFailure { err ->
+                    _bannerMessage.value = "Could not dismiss playdate: ${err.localizedMessage ?: "retry"}"
+                }
+        }
+    }
+
+    fun buyTownMaterialOffer(offer: TownMaterialOffer) {
+        val profile = (heroProfileState.value as? UiState.Success)?.data ?: return
+        if (!requireCharacterAvailable(profile)) return
+        val todayKey = currentCalendarDateKey()
+        val hc = hardcoreState.value
+        val purchasedToday = hc.townPurchasesToday(offer.id, todayKey)
+        if (purchasedToday >= offer.dailyStockLimit) {
+            _bannerMessage.value = "${offer.title} is sold out for today (${offer.dailyStockLimit}/${offer.dailyStockLimit}). Restocks at midnight!"
+            return
+        }
+        if (profile.solCoins < offer.solCoinCost) {
+            _bannerMessage.value = "Need ${offer.solCoinCost} Sol Coins for ${offer.title}. Complete Quests, Expeditions, or Watch Sleep!"
+            return
+        }
+
+        val nextCoins = (profile.solCoins - offer.solCoinCost).coerceAtLeast(0L)
+        val grantedRune = if (offer.randomRuneGrant) ElementalAffinity.entries.random() else null
+        haptics.trigger(GameplayHaptic.VICTORY_FANFARE)
+
+        viewModelScope.launch {
+            preferences.updateHardcoreRpgState { cur ->
+                val resetDaily = cur.townMerchantDateKey != todayKey
+                val nextPurchasedMap = if (resetDaily) mutableMapOf() else cur.townMerchantPurchasedMap.toMutableMap()
+                nextPurchasedMap[offer.id] = (nextPurchasedMap[offer.id] ?: 0) + 1
+
+                val nextRunes = cur.unlockedRunesMap.toMutableMap()
+                if (grantedRune != null) {
+                    nextRunes[grantedRune.name] = (nextRunes[grantedRune.name] ?: 0) + 1
+                }
+                cur.copy(
+                    sunsteelOre = (cur.sunsteelOre + offer.oreGrant).coerceAtMost(999_999L),
+                    aetherHerbs = (cur.aetherHerbs + offer.herbGrant).coerceAtMost(999_999L),
+                    elementalEssence = (cur.elementalEssence + offer.essenceGrant).coerceAtMost(999_999L),
+                    starforgedIngots = (cur.starforgedIngots + offer.starforgedIngotGrant).coerceAtMost(999L),
+                    fogLanternCharges = (cur.fogLanternCharges + offer.fogLanternGrant).coerceAtMost(99),
+                    unlockedRunesMap = nextRunes,
+                    townMerchantDateKey = todayKey,
+                    townMerchantPurchasedMap = nextPurchasedMap
+                )
+            }
+            repository.updateHeroProfile(currentUserId, mapOf("solCoins" to nextCoins))
+            val runeTag = grantedRune?.let { " (+1 ${it.label} Rune!)" } ?: ""
+            _bannerMessage.value = "Purchased ${offer.title} at Sunhaven Market (-${offer.solCoinCost} Sol Coins)$runeTag!"
+        }
+    }
+
     // --- Destructive Reset All Progress (with explicit UI confirmation modal) ---
 
     fun resetAllProgress() {
@@ -3084,7 +3972,7 @@ class SolstrideViewModel(
 
                 val res = repository.resetAllUserProgress(currentUserId, initialDisplayName)
                 if (res.isSuccess) {
-                    _bannerMessage.value = "All progress wiped. Reborn as a Level 1 Novice with a basic starter blade and zero armor."
+                    _bannerMessage.value = "All progress wiped. Reborn as a Level 1 Novice with a starter weapon, zero armor/resources, and 20 Sol Coins."
                 } else {
                     _bannerMessage.value = "Local data reset; cloud reset error: ${res.exceptionOrNull()?.localizedMessage ?: "retry when online"}"
                 }

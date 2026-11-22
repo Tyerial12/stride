@@ -10,6 +10,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,12 +55,16 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.data.model.DerivedHeroStats
 import com.example.data.model.GearPerkType
+import com.example.data.model.HeroAvatarConfig
 import com.example.data.model.HeroClass
 import com.example.data.model.HeroProfile
 import com.example.data.model.InventoryItem
@@ -67,6 +72,7 @@ import com.example.data.model.ItemRarity
 import com.example.data.model.ItemSlot
 import com.example.data.model.OwnedPet
 import com.example.data.model.PetType
+import com.example.data.model.WorldFogState
 import com.example.domain.BattleAnimAction
 import com.example.domain.BattleAnimEvent
 import com.example.domain.BattleMode
@@ -181,7 +187,8 @@ fun HeroShowcaseCard(
     modifier: Modifier = Modifier,
     compact: Boolean = false,
     isSleeping: Boolean = false,
-    sleepSourceLabel: String = ""
+    sleepSourceLabel: String = "",
+    worldFog: WorldFogState = WorldFogState()
 ) {
     val ext = LocalSolstrideColors.current
     val weapon = remember(inventory) { inventory.firstOrNull { it.equipped && it.resolvedSlot() == ItemSlot.WEAPON } }
@@ -226,16 +233,26 @@ fun HeroShowcaseCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(if (compact) 166.dp else 188.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = if (isSleeping) {
-                                listOf(Color(0xFF0A0F29), Color(0xFF151E42), Color(0xFF1D243C))
-                            } else {
-                                listOf(Color(0xFF161925), Color(0xFF232136), Color(0xFF2D1E17))
-                            }
-                        )
-                    )
             ) {
+                Image(
+                    painter = painterResource(id = R.drawable.img_hero_forge_pedestal),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = if (isSleeping) {
+                                    listOf(Color(0xCC0A0F29), Color(0xB8151E42), Color(0xD81D243C))
+                                } else {
+                                    listOf(Color(0x99161925), Color(0x88232136), Color(0xCC22150E))
+                                }
+                            )
+                        )
+                )
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val groundY = size.height * 0.80f
                     if (isSleeping) {
@@ -319,6 +336,7 @@ fun HeroShowcaseCard(
                         scale = if (compact) 0.90f else 1.02f,
                         bobY = heroBob,
                         heroClass = profile.resolvedClass(),
+                        avatar = profile.resolvedAvatar(),
                         weaponRarity = weapon?.resolvedRarity(),
                         armorRarity = armor?.resolvedRarity() ?: helm?.resolvedRarity(),
                         relicRarity = relic?.resolvedRarity() ?: ring?.resolvedRarity(),
@@ -342,6 +360,12 @@ fun HeroShowcaseCard(
                             scale = if (compact) 0.80f else 0.90f
                         )
                     }
+
+                    drawVolumetricFogOverlay(
+                        fogDensity = if (isSleeping) 0.45f else (worldFog.visualFogDensity * 0.55f),
+                        isDreamMist = isSleeping || worldFog.isDreamMistActive,
+                        driftPhase = breathPhase
+                    )
                 }
 
                 // Floating moonlit Z z z particles when Hero is sleeping
@@ -568,7 +592,8 @@ fun AnimatedBattleStage(
     equippedPet: OwnedPet?,
     battle: BattleState,
     enemy: CombatEnemy,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    worldFog: WorldFogState = WorldFogState()
 ) {
     val ext = LocalSolstrideColors.current
     val weapon = remember(inventory) { inventory.firstOrNull { it.equipped && it.resolvedSlot() == ItemSlot.WEAPON } }
@@ -722,8 +747,22 @@ fun AnimatedBattleStage(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(228.dp)
-                .background(Brush.verticalGradient(realmColors))
         ) {
+            Image(
+                painter = painterResource(id = R.drawable.img_battle_arena_vista),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            realmColors.map { it.copy(alpha = 0.68f) }
+                        )
+                    )
+            )
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val groundY = size.height * 0.80f
                 val w = size.width
@@ -780,6 +819,7 @@ fun AnimatedBattleStage(
                     scale = 1.02f,
                     bobY = heroBob,
                     heroClass = profile.resolvedClass(),
+                    avatar = profile.resolvedAvatar(),
                     weaponRarity = weapon?.resolvedRarity(),
                     armorRarity = armor?.resolvedRarity(),
                     relicRarity = relic?.resolvedRarity(),
@@ -801,6 +841,13 @@ fun AnimatedBattleStage(
                     hasShield = enemy.shield > 0,
                     hitFlash = enemyHitFlash.value,
                     auraPulse = auraPulse
+                )
+
+                // Dynamic Realm Fog-of-War & Dream Mist overlay
+                drawVolumetricFogOverlay(
+                    fogDensity = worldFog.visualFogDensity * 0.52f,
+                    isDreamMist = worldFog.isDreamMistActive,
+                    driftPhase = breathPhase
                 )
 
                 // Slash Arc VFX
@@ -1044,27 +1091,103 @@ fun AnimatedBattleStage(
     }
 }
 
-private fun DrawScope.drawHeroSprite(
+internal fun DrawScope.drawVolumetricFogOverlay(
+    fogDensity: Float,
+    isDreamMist: Boolean,
+    driftPhase: Float
+) {
+    val clamped = fogDensity.coerceIn(0f, 0.78f)
+    if (clamped <= 0.04f) return
+    val baseFogColor = if (isDreamMist) Color(0xFF93A5FF) else Color(0xFFFDE6B8)
+    val deepFogColor = if (isDreamMist) Color(0xFF312E81) else Color(0xFFD6B88D)
+
+    // Drifting lower-ground mist bank
+    val drift1 = sin(driftPhase * 0.7f) * size.width * 0.06f
+    val drift2 = cos(driftPhase * 0.5f) * size.width * 0.08f
+    drawOval(
+        brush = Brush.radialGradient(
+            colors = listOf(baseFogColor.copy(alpha = clamped * 0.55f), Color.Transparent),
+            center = Offset(size.width * 0.25f + drift1, size.height * 0.76f),
+            radius = size.width * 0.45f
+        ),
+        topLeft = Offset(-size.width * 0.15f + drift1, size.height * 0.46f),
+        size = Size(size.width * 0.85f, size.height * 0.55f)
+    )
+    drawOval(
+        brush = Brush.radialGradient(
+            colors = listOf(deepFogColor.copy(alpha = clamped * 0.45f), Color.Transparent),
+            center = Offset(size.width * 0.78f + drift2, size.height * 0.72f),
+            radius = size.width * 0.42f
+        ),
+        topLeft = Offset(size.width * 0.34f + drift2, size.height * 0.42f),
+        size = Size(size.width * 0.82f, size.height * 0.55f)
+    )
+
+    // Soft glowing sun-motes or sleep dream-fireflies
+    val moteColor = if (isDreamMist) Color(0xFFC7D2FE) else Color(0xFFFFF3C4)
+    for (i in 0 until 6) {
+        val fx = ((i * 0.17f + 0.08f) + sin(driftPhase * 0.45f + i) * 0.04f).coerceIn(0.04f, 0.96f)
+        val fy = ((0.22f + (i % 3) * 0.22f) + cos(driftPhase * 0.6f + i * 1.4f) * 0.05f).coerceIn(0.08f, 0.88f)
+        val alpha = (0.28f + 0.45f * ((sin(driftPhase + i * 1.1f) + 1f) * 0.5f)) * (0.45f + clamped)
+        drawCircle(
+            color = moteColor.copy(alpha = alpha.coerceIn(0f, 0.85f)),
+            radius = (1.8f + (i % 2) * 1.1f).dp.toPx(),
+            center = Offset(size.width * fx, size.height * fy)
+        )
+    }
+}
+
+internal fun DrawScope.drawHeroSprite(
     centerX: Float,
     groundY: Float,
     scale: Float,
     bobY: Float,
     heroClass: HeroClass,
-    weaponRarity: ItemRarity?,
-    armorRarity: ItemRarity?,
-    relicRarity: ItemRarity?,
-    prestigeLevel: Int,
-    auraPulse: Float,
-    facingRight: Boolean,
-    swingProgress: Float,
-    guardAlpha: Float,
+    avatar: HeroAvatarConfig = HeroAvatarConfig(),
+    weaponRarity: ItemRarity? = null,
+    armorRarity: ItemRarity? = null,
+    relicRarity: ItemRarity? = null,
+    prestigeLevel: Int = 0,
+    auraPulse: Float = 0.85f,
+    facingRight: Boolean = true,
+    swingProgress: Float = 0f,
+    guardAlpha: Float = 0f,
     hitFlash: Float = 0f
 ) {
+    val norm = avatar.normalized()
     val dir = if (facingRight) 1f else -1f
     val u = 1.dp.toPx() * scale
-    val armorColor = if (hitFlash > 0.2f) Color(0xFFFF5A5F) else gearAccentColor(armorRarity)
-    val weaponColor = gearAccentColor(weaponRarity)
+    val palette = HeroAvatarConfig.OUTFIT_PALETTES[norm.outfitPalette]
+    val primaryOutfit = Color(palette.primaryHex)
+    val cloakColor = Color(palette.cloakHex)
+    val trimColor = Color(palette.trimHex)
+    val skinColor = Color(HeroAvatarConfig.SKIN_TONE_HEXES[norm.skinTone])
+    val hairColor = Color(HeroAvatarConfig.HAIR_COLOR_HEXES[norm.hairColor])
+    val eyeColor = Color(HeroAvatarConfig.EYE_COLOR_HEXES[norm.eyeColor])
+    val auraColor = Color(HeroAvatarConfig.AURA_HEXES[norm.aura])
+
+    val armorColor = when {
+        hitFlash > 0.2f -> Color(0xFFFF5A5F)
+        armorRarity != null && armorRarity.tier >= 2 -> gearAccentColor(armorRarity)
+        else -> primaryOutfit
+    }
+    val weaponColor = gearAccentColor(weaponRarity ?: ItemRarity.COMMON)
     val relicColor = gearAccentColor(relicRarity)
+
+    // Radiant Aura Halo behind character
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(
+                auraColor.copy(alpha = 0.36f * auraPulse),
+                auraColor.copy(alpha = 0.12f * auraPulse),
+                Color.Transparent
+            ),
+            center = Offset(centerX, groundY - 52 * u + bobY),
+            radius = 48 * u * (0.92f + auraPulse * 0.12f)
+        ),
+        radius = 48 * u * (0.92f + auraPulse * 0.12f),
+        center = Offset(centerX, groundY - 52 * u + bobY)
+    )
 
     // Ground shadow
     drawOval(
@@ -1075,38 +1198,27 @@ private fun DrawScope.drawHeroSprite(
 
     // Floating Relic Astrolabe Orb behind hero
     if (relicRarity != null) {
-        val orbCenter = Offset(centerX - 22 * u * dir, groundY - 68 * u + bobY * 1.4f)
-        drawCircle(
-            color = relicColor.copy(alpha = 0.28f * auraPulse),
-            radius = 15 * u,
-            center = orbCenter
-        )
-        drawCircle(
-            color = relicColor,
-            radius = 6 * u,
-            center = orbCenter
-        )
-        drawCircle(
-            color = Color.White.copy(alpha = 0.85f),
-            radius = 10 * u,
-            center = orbCenter,
-            style = Stroke(width = 1.5f * u)
-        )
+        val orbCenter = Offset(centerX - 24 * u * dir, groundY - 68 * u + bobY * 1.3f)
+        drawCircle(color = relicColor.copy(alpha = 0.28f * auraPulse), radius = 14 * u, center = orbCenter)
+        drawCircle(color = relicColor, radius = 5.5f * u, center = orbCenter)
+        drawCircle(color = Color.White.copy(alpha = 0.85f), radius = 9.5f * u, center = orbCenter, style = Stroke(width = 1.4f * u))
     }
 
-    // Hero Cape (flowing behind)
-    val capeColor = when (heroClass) {
-        HeroClass.VANGUARD -> Color(0xFF991B1B)
-        HeroClass.STRIDER -> Color(0xFF0F766E)
-        HeroClass.SUNBLADE -> Color(0xFFB45309)
-    }
+    // Flowing Hero Cloak
     val capePath = Path().apply {
         moveTo(centerX - 8 * u * dir, groundY - 64 * u + bobY)
-        lineTo(centerX - 26 * u * dir, groundY - 12 * u + bobY * 0.5f)
-        lineTo(centerX - 6 * u * dir, groundY - 16 * u)
+        lineTo(centerX - 28 * u * dir, groundY - 12 * u + bobY * 0.45f)
+        lineTo(centerX - 6 * u * dir, groundY - 15 * u)
         close()
     }
-    drawPath(capePath, color = capeColor)
+    drawPath(capePath, color = cloakColor)
+    drawLine(
+        color = trimColor.copy(alpha = 0.8f),
+        start = Offset(centerX - 27 * u * dir, groundY - 13 * u + bobY * 0.45f),
+        end = Offset(centerX - 7 * u * dir, groundY - 15 * u),
+        strokeWidth = 2.2f * u,
+        cap = StrokeCap.Round
+    )
 
     // Boots / Legs
     drawRoundRect(
@@ -1121,98 +1233,178 @@ private fun DrawScope.drawHeroSprite(
         size = Size(8 * u, 25 * u),
         cornerRadius = CornerRadius(3 * u, 3 * u)
     )
+    // Boot trims
+    drawLine(color = trimColor, start = Offset(centerX - 11 * u, groundY - 14 * u), end = Offset(centerX - 3 * u, groundY - 14 * u), strokeWidth = 2 * u)
+    drawLine(color = trimColor, start = Offset(centerX + 3 * u, groundY - 14 * u), end = Offset(centerX + 11 * u, groundY - 14 * u), strokeWidth = 2 * u)
 
-    // Armored Torso (colored by equipped Armor rarity!)
+    // Torso / Tunic / Plate
     drawRoundRect(
         color = armorColor,
         topLeft = Offset(centerX - 16 * u, groundY - 66 * u + bobY),
         size = Size(32 * u, 42 * u),
         cornerRadius = CornerRadius(8 * u, 8 * u)
     )
-    // Chest Emblem / Trim
+    // Inner vest & golden sash
     drawRoundRect(
-        color = Color(0xFF1A1D26),
-        topLeft = Offset(centerX - 11 * u, groundY - 58 * u + bobY),
-        size = Size(22 * u, 16 * u),
+        color = cloakColor.copy(alpha = 0.85f),
+        topLeft = Offset(centerX - 10 * u, groundY - 58 * u + bobY),
+        size = Size(20 * u, 24 * u),
         cornerRadius = CornerRadius(4 * u, 4 * u)
     )
     drawCircle(
-        color = Color(0xFFFFD166),
+        color = trimColor,
         radius = 4.5f * u,
         center = Offset(centerX, groundY - 50 * u + bobY)
     )
     // Shoulder Pauldrons
-    drawCircle(
-        color = armorColor,
-        radius = 8 * u,
-        center = Offset(centerX - 16 * u, groundY - 60 * u + bobY)
-    )
-    drawCircle(
-        color = armorColor,
-        radius = 8 * u,
-        center = Offset(centerX + 16 * u, groundY - 60 * u + bobY)
-    )
+    drawCircle(color = armorColor, radius = 8 * u, center = Offset(centerX - 16 * u, groundY - 60 * u + bobY))
+    drawCircle(color = armorColor, radius = 8 * u, center = Offset(centerX + 16 * u, groundY - 60 * u + bobY))
+    drawCircle(color = trimColor, radius = 8 * u, center = Offset(centerX - 16 * u, groundY - 60 * u + bobY), style = Stroke(width = 1.4f * u))
+    drawCircle(color = trimColor, radius = 8 * u, center = Offset(centerX + 16 * u, groundY - 60 * u + bobY), style = Stroke(width = 1.4f * u))
 
-    // Head & Class Helm
+    // Head with custom Skin Tone
     val headY = groundY - 82 * u + bobY
-    drawCircle(
-        color = Color(0xFFF3D2B3),
-        radius = 12 * u,
-        center = Offset(centerX, headY)
-    )
-    // Helm / Hood by Class
-    when (heroClass) {
-        HeroClass.VANGUARD -> {
+    drawCircle(color = skinColor, radius = 12.5f * u, center = Offset(centerX, headY))
+
+    // Custom Hair Style (6 distinct styles)
+    when (norm.hairStyle) {
+        0 -> { // Spiked Crest
+            val spikes = Path().apply {
+                moveTo(centerX - 12 * u, headY - 4 * u)
+                lineTo(centerX - 14 * u, headY - 14 * u)
+                lineTo(centerX - 5 * u, headY - 12 * u)
+                lineTo(centerX, headY - 21 * u)
+                lineTo(centerX + 6 * u, headY - 12 * u)
+                lineTo(centerX + 13 * u, headY - 15 * u)
+                lineTo(centerX + 11 * u, headY - 3 * u)
+                close()
+            }
+            drawPath(spikes, color = hairColor)
+        }
+        1 -> { // Flowing Mane
+            val mane = Path().apply {
+                moveTo(centerX - 14 * u, headY - 6 * u)
+                lineTo(centerX - 18 * u * dir, headY + 14 * u)
+                lineTo(centerX - 6 * u * dir, headY + 10 * u)
+                lineTo(centerX + 12 * u, headY - 5 * u)
+                lineTo(centerX, headY - 16 * u)
+                close()
+            }
+            drawPath(mane, color = hairColor)
             drawArc(
-                color = armorColor,
+                color = hairColor,
                 startAngle = 180f,
                 sweepAngle = 180f,
                 useCenter = true,
                 topLeft = Offset(centerX - 13 * u, headY - 14 * u),
-                size = Size(26 * u, 22 * u)
+                size = Size(26 * u, 16 * u)
             )
-            // Golden crest plume
+        }
+        2 -> { // Braided Crown
+            drawArc(
+                color = hairColor,
+                startAngle = 180f,
+                sweepAngle = 180f,
+                useCenter = true,
+                topLeft = Offset(centerX - 13.5f * u, headY - 15 * u),
+                size = Size(27 * u, 18 * u)
+            )
             drawLine(
-                color = Color(0xFFFFD166),
-                start = Offset(centerX, headY - 14 * u),
-                end = Offset(centerX - 6 * u * dir, headY - 24 * u),
-                strokeWidth = 3.5f * u,
+                color = hairColor,
+                start = Offset(centerX - 10 * u * dir, headY - 4 * u),
+                end = Offset(centerX - 14 * u * dir, headY + 14 * u),
+                strokeWidth = 5 * u,
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = trimColor,
+                start = Offset(centerX - 12 * u, headY - 7 * u),
+                end = Offset(centerX + 12 * u, headY - 7 * u),
+                strokeWidth = 2.4f * u,
                 cap = StrokeCap.Round
             )
         }
-        HeroClass.STRIDER -> {
-            val hood = Path().apply {
-                moveTo(centerX - 15 * u, headY)
-                lineTo(centerX, headY - 18 * u)
-                lineTo(centerX + 15 * u, headY)
+        3 -> { // Rogue Sweep
+            val sweep = Path().apply {
+                moveTo(centerX - 14 * u, headY - 2 * u)
+                lineTo(centerX - 10 * u, headY - 15 * u)
+                lineTo(centerX + 14 * u * dir, headY - 9 * u)
+                lineTo(centerX + 8 * u * dir, headY + 1 * u)
                 close()
             }
-            drawPath(hood, color = Color(0xFF0F766E))
+            drawPath(sweep, color = hairColor)
         }
-        HeroClass.SUNBLADE -> {
-            drawCircle(
-                color = Color(0xFFFFB800).copy(alpha = 0.45f * auraPulse),
-                radius = 16 * u,
-                center = Offset(centerX, headY - 2 * u),
-                style = Stroke(width = 2.5f * u)
-            )
+        4 -> { // Scholar Cut
             drawArc(
-                color = Color(0xFFFFD166),
-                startAngle = 190f,
-                sweepAngle = 160f,
-                useCenter = false,
-                topLeft = Offset(centerX - 13 * u, headY - 13 * u),
-                size = Size(26 * u, 18 * u),
-                style = Stroke(width = 3 * u)
+                color = hairColor,
+                startAngle = 170f,
+                sweepAngle = 200f,
+                useCenter = true,
+                topLeft = Offset(centerX - 13 * u, headY - 14 * u),
+                size = Size(26 * u, 18 * u)
+            )
+            drawCircle(color = trimColor, radius = 2.6f * u, center = Offset(centerX + 4 * u * dir, headY - 10 * u))
+        }
+        else -> { // Crowned Halo
+            drawArc(
+                color = hairColor,
+                startAngle = 180f,
+                sweepAngle = 180f,
+                useCenter = true,
+                topLeft = Offset(centerX - 13 * u, headY - 15 * u),
+                size = Size(26 * u, 17 * u)
+            )
+            drawCircle(
+                color = auraColor.copy(alpha = 0.85f),
+                radius = 16 * u,
+                center = Offset(centerX, headY - 5 * u),
+                style = Stroke(width = 2.2f * u)
             )
         }
     }
-    // Visor / Eyes
-    drawCircle(
-        color = Color(0xFF111318),
-        radius = 2 * u,
-        center = Offset(centerX + 5 * u * dir, headY - 1 * u)
-    )
+
+    // Class Headgear Accent (subtle so custom hair stays visible!)
+    when (heroClass) {
+        HeroClass.VANGUARD -> {
+            drawLine(
+                color = trimColor,
+                start = Offset(centerX - 11 * u, headY - 8 * u),
+                end = Offset(centerX + 11 * u, headY - 8 * u),
+                strokeWidth = 2.8f * u,
+                cap = StrokeCap.Round
+            )
+        }
+        HeroClass.ARCANIST -> {
+            drawCircle(
+                color = auraColor.copy(alpha = 0.65f * auraPulse),
+                radius = 16 * u,
+                center = Offset(centerX, headY - 2 * u),
+                style = Stroke(width = 1.8f * u)
+            )
+        }
+        HeroClass.RANGER -> {
+            drawLine(
+                color = Color(0xFF34D399),
+                start = Offset(centerX - 8 * u * dir, headY - 12 * u),
+                end = Offset(centerX - 16 * u * dir, headY - 22 * u),
+                strokeWidth = 2.6f * u,
+                cap = StrokeCap.Round
+            )
+        }
+        HeroClass.SHADOWBLADE -> {
+            // Half-face eclipse scarf
+            drawRoundRect(
+                color = cloakColor,
+                topLeft = Offset(centerX - 10 * u, headY + 2 * u),
+                size = Size(20 * u, 8 * u),
+                cornerRadius = CornerRadius(3 * u, 3 * u)
+            )
+        }
+    }
+
+    // Expressive Eyes with custom Eye Color & Specular Glint
+    drawCircle(color = eyeColor, radius = 2.5f * u, center = Offset(centerX + 5.2f * u * dir, headY - 1 * u))
+    drawCircle(color = Color.White, radius = 0.9f * u, center = Offset(centerX + 6.0f * u * dir, headY - 1.8f * u))
 
     // Prestige Solar Crown above head!
     if (prestigeLevel > 0) {
@@ -1231,53 +1423,83 @@ private fun DrawScope.drawHeroSprite(
         drawPath(crownPath, color = Color(0xFFFF6B00), style = Stroke(width = 1.2f * u))
     }
 
-    // Equipped Weapon (glows and swings forward on strike!)
-    val swingAngleOffset = swingProgress * 46 * u
-    val hiltPos = Offset(centerX + 18 * u * dir, groundY - 48 * u + bobY)
+    // Class-Distinct Equipped Weapon (swings forward on attack!)
+    val swingAngleOffset = swingProgress * 44 * u
+    val hiltPos = Offset(centerX + 17 * u * dir, groundY - 48 * u + bobY)
     val tipPos = Offset(
         centerX + (38 * u + swingAngleOffset * 0.45f) * dir,
         groundY - 84 * u + bobY + swingAngleOffset
     )
     if (weaponRarity == ItemRarity.SOLAR || weaponRarity == ItemRarity.ULTRA_RARE) {
         drawLine(
-            color = weaponColor.copy(alpha = 0.40f * auraPulse),
+            color = weaponColor.copy(alpha = 0.42f * auraPulse),
             start = hiltPos,
             end = tipPos,
             strokeWidth = 12 * u,
             cap = StrokeCap.Round
         )
     }
-    drawLine(
-        color = weaponColor,
-        start = hiltPos,
-        end = tipPos,
-        strokeWidth = 5.5f * u,
-        cap = StrokeCap.Round
-    )
-    // Crossguard
-    drawLine(
-        color = Color(0xFFFFD166),
-        start = Offset(hiltPos.x - 5 * u, hiltPos.y + 3 * u),
-        end = Offset(hiltPos.x + 5 * u, hiltPos.y - 3 * u),
-        strokeWidth = 3.5f * u,
-        cap = StrokeCap.Round
-    )
 
-    // Vanguard off-hand shield or active Aegis Guard dome
-    if (heroClass == HeroClass.VANGUARD) {
-        drawRoundRect(
-            color = armorColor,
-            topLeft = Offset(centerX + 6 * u * dir, groundY - 56 * u + bobY),
-            size = Size(12 * u, 22 * u),
-            cornerRadius = CornerRadius(4 * u, 4 * u)
-        )
-        drawRoundRect(
-            color = Color(0xFFFFD166),
-            topLeft = Offset(centerX + 6 * u * dir, groundY - 56 * u + bobY),
-            size = Size(12 * u, 22 * u),
-            cornerRadius = CornerRadius(4 * u, 4 * u),
-            style = Stroke(width = 1.8f * u)
-        )
+    when (heroClass) {
+        HeroClass.VANGUARD -> {
+            // Sun-Forged Broadsword + Kite Shield
+            drawLine(color = weaponColor, start = hiltPos, end = tipPos, strokeWidth = 5.5f * u, cap = StrokeCap.Round)
+            drawLine(
+                color = trimColor,
+                start = Offset(hiltPos.x - 5 * u, hiltPos.y + 3 * u),
+                end = Offset(hiltPos.x + 5 * u, hiltPos.y - 3 * u),
+                strokeWidth = 3.5f * u,
+                cap = StrokeCap.Round
+            )
+            drawRoundRect(
+                color = armorColor,
+                topLeft = Offset(centerX + 4 * u * dir - (if (facingRight) 0f else 12 * u), groundY - 56 * u + bobY),
+                size = Size(12 * u, 22 * u),
+                cornerRadius = CornerRadius(4 * u, 4 * u)
+            )
+            drawRoundRect(
+                color = trimColor,
+                topLeft = Offset(centerX + 4 * u * dir - (if (facingRight) 0f else 12 * u), groundY - 56 * u + bobY),
+                size = Size(12 * u, 22 * u),
+                cornerRadius = CornerRadius(4 * u, 4 * u),
+                style = Stroke(width = 1.8f * u)
+            )
+        }
+        HeroClass.ARCANIST -> {
+            // Arcane Sun-Staff with glowing elemental crystal orb
+            drawLine(color = Color(0xFF92400E), start = Offset(hiltPos.x, hiltPos.y + 18 * u), end = tipPos, strokeWidth = 4 * u, cap = StrokeCap.Round)
+            drawCircle(color = auraColor.copy(alpha = 0.45f * auraPulse), radius = 11 * u, center = tipPos)
+            drawCircle(color = weaponColor, radius = 6 * u, center = tipPos)
+            drawCircle(color = Color.White, radius = 2.4f * u, center = Offset(tipPos.x - 1.5f * u, tipPos.y - 1.5f * u))
+        }
+        HeroClass.RANGER -> {
+            // Curved Highland Bow + glowing arrow shaft
+            val bowRectLeft = centerX + (if (facingRight) 8 * u else -30 * u)
+            drawArc(
+                color = weaponColor,
+                startAngle = if (facingRight) -75f else 105f,
+                sweepAngle = 150f,
+                useCenter = false,
+                topLeft = Offset(bowRectLeft, groundY - 78 * u + bobY),
+                size = Size(22 * u, 44 * u),
+                style = Stroke(width = 3.8f * u, cap = StrokeCap.Round)
+            )
+            drawLine(
+                color = Color(0xFFFFF8E7),
+                start = Offset(centerX + 12 * u * dir, groundY - 56 * u + bobY),
+                end = Offset(centerX + (34 * u + swingAngleOffset * 0.4f) * dir, groundY - 56 * u + bobY),
+                strokeWidth = 2.2f * u,
+                cap = StrokeCap.Round
+            )
+        }
+        HeroClass.SHADOWBLADE -> {
+            // Twin Eclipse Daggers (front + offhand reverse grip)
+            val daggerTip = Offset(centerX + (33 * u + swingAngleOffset * 0.4f) * dir, groundY - 68 * u + bobY + swingAngleOffset * 0.6f)
+            drawLine(color = weaponColor, start = hiltPos, end = daggerTip, strokeWidth = 4.2f * u, cap = StrokeCap.Round)
+            val offHilt = Offset(centerX - 14 * u * dir, groundY - 46 * u + bobY)
+            val offTip = Offset(centerX - 28 * u * dir, groundY - 60 * u + bobY)
+            drawLine(color = weaponColor, start = offHilt, end = offTip, strokeWidth = 3.8f * u, cap = StrokeCap.Round)
+        }
     }
 
     if (guardAlpha > 0.05f) {
@@ -1295,7 +1517,7 @@ private fun DrawScope.drawHeroSprite(
     }
 }
 
-private fun DrawScope.drawPetSprite(
+internal fun DrawScope.drawPetSprite(
     centerX: Float,
     groundY: Float,
     petType: PetType,

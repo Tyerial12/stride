@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.R
 import com.example.data.model.DEFAULT_SKILL_RANKS
 import com.example.data.model.GearPerkType
+import com.example.data.model.HeroAvatarConfig
 import com.example.data.model.HeroClass
 import com.example.data.model.HeroProfile
 import com.example.data.model.InventoryItem
@@ -11,8 +12,13 @@ import com.example.data.model.ItemRarity
 import com.example.data.model.ItemSlot
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LootChest
+import com.example.data.model.MultiplayerChatMessage
+import com.example.data.model.MultiplayerDuel
+import com.example.data.model.MultiplayerPetPlaydate
 import com.example.data.model.OwnedPet
+import com.example.data.model.PetPlayActivity
 import com.example.data.model.PetType
+import com.example.data.model.TownPresencePlayer
 import com.example.data.model.currentCalendarDateKey
 import com.example.data.model.currentIsoWeekKey
 import com.google.firebase.Firebase
@@ -168,6 +174,84 @@ class SolstrideFirestoreRepository(
         )
     }
 
+    fun observeTownPresence(userId: String): Flow<List<TownPresencePlayer>> = flow {
+        val uid = requireUserId(userId)
+        val path = "town_presence"
+        emitAll(
+            db.collection("town_presence")
+                .whereEqualTo("inTown", true)
+                .limit(25)
+                .snapshots()
+                .map { snapshot ->
+                    val nowSec = System.currentTimeMillis() / 1000L
+                    snapshot.toObjects(TownPresencePlayer::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .filter { player ->
+                            val ts = player.updatedAt?.seconds ?: nowSec
+                            (nowSec - ts) <= 300L
+                        }
+                }
+                .catch { error ->
+                    val fsError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (fsError == null && error is CancellationException) throw error
+                    if (auth.currentUser?.uid == uid) {
+                        handleFirestoreError(fsError ?: error, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun upsertTownPresence(
+        userId: String,
+        presence: TownPresencePlayer
+    ): Result<Unit> {
+        val path = "town_presence/$userId"
+        return try {
+            val uid = requireUserId(userId)
+            val payload = mapOf(
+                "userId" to uid,
+                "displayName" to presence.displayName.trim().take(50).ifBlank { "Strider" },
+                "heroClass" to presence.resolvedClass().name,
+                "heroLevel" to presence.heroLevel.coerceIn(1L, 999L),
+                "heroPower" to presence.heroPower.coerceIn(1L, 10_000_000L),
+                "prestigeLevel" to presence.prestigeLevel.coerceIn(0L, 99L),
+                "avatarConfig" to presence.resolvedAvatar().serialize(),
+                "equippedPetId" to presence.equippedPetId.take(40),
+                "equippedPetLevel" to presence.equippedPetLevel.coerceIn(1L, 50L),
+                "posX" to presence.posX.coerceIn(0.0, 1.0),
+                "posY" to presence.posY.coerceIn(0.0, 1.0),
+                "facingRight" to presence.facingRight,
+                "emote" to presence.emote.take(32),
+                "inTown" to presence.inTown,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            db.collection("town_presence").document(uid)
+                .set(payload)
+                .await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun leaveTownPresence(userId: String): Result<Unit> {
+        val path = "town_presence/$userId"
+        return try {
+            val uid = requireUserId(userId)
+            db.collection("town_presence").document(uid).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun ensureInitializedProfile(userId: String, rawDisplayName: String?): Result<Unit> {
         val profilePath = "users/$userId"
         return try {
@@ -195,8 +279,8 @@ class SolstrideFirestoreRepository(
                     "strideEnergy" to 45L,
                     "maxStrideEnergy" to 110L,
                     "encounterProgress" to 40L,
-                    "sunshards" to 85L,
-                    "solCoins" to 0L,
+                    "sunshards" to 0L,
+                    "solCoins" to 20L,
                     "totalSteps" to 0L,
                     "weeklySteps" to 0L,
                     "weekKey" to weekKey,
@@ -215,7 +299,9 @@ class SolstrideFirestoreRepository(
                     "currentSpireFloor" to 1L,
                     "highestSpireFloor" to 0L,
                     "prestigeLevel" to 0L,
-                    "skillRanks" to DEFAULT_SKILL_RANKS,
+                    "skillRanks" to "1,0,0,0,0,0,0,0,0",
+                    "avatarConfig" to HeroAvatarConfig.DEFAULT_RAW,
+                    "characterCreated" to false,
                     "dailyQuestDateKey" to todayKey,
                     "dailyBattlesWon" to 0L,
                     "dailyExpeditionsDone" to 0L,
@@ -287,28 +373,9 @@ class SolstrideFirestoreRepository(
                 "upgradeLevel" to 0L,
                 "quantity" to 1L,
                 "equipped" to true,
-                "description" to "+6% Critical Strike Chance • Basic starter blade. Gather materials to forge custom weapons and your first armor!",
+                "description" to "+6% Critical Strike Chance • Basic starter weapon. Spend Sol Coins in Sunhaven or battle to gather materials and forge armor!",
                 "perkType" to GearPerkType.CRIT_CHANCE.name,
                 "perkValue" to 6L,
-                "createdAt" to FieldValue.serverTimestamp(),
-                "updatedAt" to FieldValue.serverTimestamp()
-            ),
-            "starter_elixir" to mapOf(
-                "userId" to uid,
-                "name" to "Amber Dawn Elixir",
-                "slot" to ItemSlot.CONSUMABLE.name,
-                "rarity" to ItemRarity.COMMON.name,
-                "attackBonus" to 0L,
-                "defenseBonus" to 0L,
-                "hpBonus" to 0L,
-                "energyBonus" to 0L,
-                "healAmount" to 80L,
-                "upgradeLevel" to 0L,
-                "quantity" to 2L,
-                "equipped" to false,
-                "description" to "Restores 80 HP instantly during or between battles.",
-                "perkType" to GearPerkType.NONE.name,
-                "perkValue" to 0L,
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
             )
@@ -677,6 +744,323 @@ class SolstrideFirestoreRepository(
                 .collection("inventory").document(itemId)
                 .delete()
                 .await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    // --- Real-Time Multiplayer Chat (/multiplayer_chat) ---
+
+    fun observeMultiplayerChat(userId: String): Flow<List<MultiplayerChatMessage>> = flow {
+        val uid = requireUserId(userId)
+        val path = "multiplayer_chat"
+        emitAll(
+            db.collection("multiplayer_chat")
+                .whereEqualTo("channel", "GLOBAL")
+                .limit(80)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        MultiplayerChatMessage::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    ).sortedBy { it.createdAt?.seconds ?: Long.MAX_VALUE }
+                        .takeLast(60)
+                }
+                .catch { error ->
+                    val fsError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (fsError == null && error is CancellationException) throw error
+                    if (auth.currentUser?.uid == uid) {
+                        handleFirestoreError(fsError ?: error, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun sendMultiplayerChatMessage(
+        userId: String,
+        profile: HeroProfile,
+        rawMessage: String
+    ): Result<Unit> {
+        val docId = "msg_${UUID.randomUUID().toString().replace("-", "").take(18)}"
+        val path = "multiplayer_chat/$docId"
+        return try {
+            val uid = requireUserId(userId)
+            val cleanMsg = rawMessage.trim().take(240)
+            require(cleanMsg.isNotEmpty()) { "Message must not be empty" }
+            val safePetId = PetType.entries.firstOrNull { it.name == profile.equippedPetId }?.name ?: ""
+            val payload = mapOf(
+                "userId" to uid,
+                "displayName" to profile.displayName.trim().take(50).ifBlank { "Strider" },
+                "heroClass" to profile.resolvedClass().name,
+                "heroLevel" to profile.level.coerceIn(1L, 999L),
+                "avatarConfig" to profile.resolvedAvatar().serialize(),
+                "equippedPetId" to safePetId,
+                "message" to cleanMsg,
+                "channel" to "GLOBAL",
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+            db.collection("multiplayer_chat").document(docId).set(payload).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteMultiplayerChatMessage(userId: String, messageId: String): Result<Unit> {
+        val path = "multiplayer_chat/$messageId"
+        return try {
+            requireUserId(userId)
+            require(messageId.isNotBlank()) { "Message ID must not be blank" }
+            db.collection("multiplayer_chat").document(messageId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    // --- Real-Time Multiplayer Hero Duels (/multiplayer_duels) ---
+
+    fun observeMultiplayerDuels(userId: String): Flow<List<MultiplayerDuel>> = flow {
+        val uid = requireUserId(userId)
+        val path = "multiplayer_duels"
+        emitAll(
+            db.collection("multiplayer_duels")
+                .whereArrayContains("participantUids", uid)
+                .limit(25)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        MultiplayerDuel::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    ).sortedByDescending { it.updatedAt?.seconds ?: 0L }
+                }
+                .catch { error ->
+                    val fsError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (fsError == null && error is CancellationException) throw error
+                    if (auth.currentUser?.uid == uid) {
+                        handleFirestoreError(fsError ?: error, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun createDuelChallenge(
+        userId: String,
+        challenger: HeroProfile,
+        challengerMaxHp: Long,
+        challengerPower: Long,
+        opponent: TownPresencePlayer
+    ): Result<String> {
+        val docId = "duel_${UUID.randomUUID().toString().replace("-", "").take(18)}"
+        val path = "multiplayer_duels/$docId"
+        return try {
+            val uid = requireUserId(userId)
+            val oppUid = opponent.userId.ifBlank { opponent.id }
+            require(oppUid.isNotBlank() && oppUid != uid) { "Invalid duel opponent" }
+
+            val safeChallengerHp = challengerMaxHp.coerceIn(100L, 1_000_000L)
+            val safeOppHp = (120L + opponent.heroLevel * 28L + (opponent.heroPower / 4L)).coerceIn(100L, 1_000_000L)
+            val cPet = PetType.entries.firstOrNull { it.name == challenger.equippedPetId }?.name ?: ""
+            val oPet = PetType.entries.firstOrNull { it.name == opponent.equippedPetId }?.name ?: ""
+            val cName = challenger.displayName.trim().take(50).ifBlank { "Strider" }
+            val oName = opponent.displayName.trim().take(50).ifBlank { "Strider" }
+
+            val payload = mapOf(
+                "participantUids" to listOf(uid, oppUid),
+                "challengerUid" to uid,
+                "challengerName" to cName,
+                "challengerClass" to challenger.resolvedClass().name,
+                "challengerLevel" to challenger.level.coerceIn(1L, 999L),
+                "challengerPower" to challengerPower.coerceIn(1L, 10_000_000L),
+                "challengerAvatar" to challenger.resolvedAvatar().serialize(),
+                "challengerPetId" to cPet,
+                "challengerHp" to safeChallengerHp,
+                "challengerMaxHp" to safeChallengerHp,
+                "challengerGuard" to false,
+                "opponentUid" to oppUid,
+                "opponentName" to oName,
+                "opponentClass" to opponent.resolvedClass().name,
+                "opponentLevel" to opponent.heroLevel.coerceIn(1L, 999L),
+                "opponentPower" to opponent.heroPower.coerceIn(1L, 10_000_000L),
+                "opponentAvatar" to opponent.resolvedAvatar().serialize(),
+                "opponentPetId" to oPet,
+                "opponentHp" to safeOppHp,
+                "opponentMaxHp" to safeOppHp,
+                "opponentGuard" to false,
+                "status" to "PENDING",
+                "turnUid" to uid,
+                "turnNumber" to 1L,
+                "winnerUid" to "",
+                "lastActionLog" to "$cName challenged $oName to a Solar Duel!".take(240),
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            db.collection("multiplayer_duels").document(docId).set(payload).await()
+            Result.success(docId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateDuelState(
+        userId: String,
+        duelId: String,
+        updates: Map<String, Any>
+    ): Result<Unit> {
+        val path = "multiplayer_duels/$duelId"
+        return try {
+            requireUserId(userId)
+            require(duelId.isNotBlank()) { "Duel ID must not be blank" }
+            val payload = updates.toMutableMap().apply {
+                put("updatedAt", FieldValue.serverTimestamp())
+            }
+            db.collection("multiplayer_duels").document(duelId).update(payload).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteDuel(userId: String, duelId: String): Result<Unit> {
+        val path = "multiplayer_duels/$duelId"
+        return try {
+            requireUserId(userId)
+            require(duelId.isNotBlank()) { "Duel ID must not be blank" }
+            db.collection("multiplayer_duels").document(duelId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    // --- Real-Time Companion Pet Playdates (/multiplayer_pet_playdates) ---
+
+    fun observePetPlaydates(userId: String): Flow<List<MultiplayerPetPlaydate>> = flow {
+        val uid = requireUserId(userId)
+        val path = "multiplayer_pet_playdates"
+        emitAll(
+            db.collection("multiplayer_pet_playdates")
+                .whereArrayContains("participantUids", uid)
+                .limit(20)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        MultiplayerPetPlaydate::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    ).sortedByDescending { it.updatedAt?.seconds ?: 0L }
+                }
+                .catch { error ->
+                    val fsError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (fsError == null && error is CancellationException) throw error
+                    if (auth.currentUser?.uid == uid) {
+                        handleFirestoreError(fsError ?: error, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun createPetPlaydate(
+        userId: String,
+        hostProfile: HeroProfile,
+        hostPet: OwnedPet,
+        guestPlayer: TownPresencePlayer
+    ): Result<String> {
+        val docId = "play_${UUID.randomUUID().toString().replace("-", "").take(18)}"
+        val path = "multiplayer_pet_playdates/$docId"
+        return try {
+            val uid = requireUserId(userId)
+            val guestUid = guestPlayer.userId.ifBlank { guestPlayer.id }
+            val guestPetType = guestPlayer.resolvedPetType()
+            require(guestUid.isNotBlank() && guestUid != uid && guestPetType != null) {
+                "Both players must have an equipped companion pet to start a playdate"
+            }
+            val hostPetType = hostPet.resolvedType()
+            val hName = hostProfile.displayName.trim().take(50).ifBlank { "Strider" }
+            val gName = guestPlayer.displayName.trim().take(50).ifBlank { "Strider" }
+            val payload = mapOf(
+                "participantUids" to listOf(uid, guestUid),
+                "hostUid" to uid,
+                "hostName" to hName,
+                "hostPetType" to hostPetType.name,
+                "hostPetLevel" to hostPet.level.coerceIn(1L, 50L),
+                "guestUid" to guestUid,
+                "guestName" to gName,
+                "guestPetType" to guestPetType.name,
+                "guestPetLevel" to guestPlayer.equippedPetLevel.coerceIn(1L, 50L),
+                "status" to "PENDING",
+                "activity" to PetPlayActivity.CHASE.id,
+                "playCount" to 0L,
+                "happinessBonus" to 0L,
+                "lastPlayLog" to "${hostPetType.displayName} invited ${guestPetType.displayName} to play in the Sunhaven Pet Park!".take(240),
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            db.collection("multiplayer_pet_playdates").document(docId).set(payload).await()
+            Result.success(docId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updatePetPlaydate(
+        userId: String,
+        playdateId: String,
+        updates: Map<String, Any>
+    ): Result<Unit> {
+        val path = "multiplayer_pet_playdates/$playdateId"
+        return try {
+            requireUserId(userId)
+            require(playdateId.isNotBlank()) { "Playdate ID must not be blank" }
+            val payload = updates.toMutableMap().apply {
+                put("updatedAt", FieldValue.serverTimestamp())
+            }
+            db.collection("multiplayer_pet_playdates").document(playdateId).update(payload).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deletePetPlaydate(userId: String, playdateId: String): Result<Unit> {
+        val path = "multiplayer_pet_playdates/$playdateId"
+        return try {
+            requireUserId(userId)
+            require(playdateId.isNotBlank()) { "Playdate ID must not be blank" }
+            db.collection("multiplayer_pet_playdates").document(playdateId).delete().await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e

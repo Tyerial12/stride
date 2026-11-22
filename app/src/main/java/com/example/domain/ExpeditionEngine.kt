@@ -295,8 +295,8 @@ object ExpeditionEngine {
 
         val baseXp = (28L + (durationMin * 0.45f).roundToInt().toLong() + safeLvl * 8L)
         val fullXp = (baseXp * stats.totalXpMultiplier).roundToInt().toLong().coerceAtLeast(25L)
-        val fullShards = ((22L + (durationMin * 0.35f).roundToInt().toLong()) * stats.totalSunshardMultiplier)
-            .roundToInt().toLong().coerceAtLeast(20L)
+        val fullShards = ((10L + (durationMin * 0.14f).roundToInt().toLong()) * stats.totalSunshardMultiplier)
+            .roundToInt().toLong().coerceAtLeast(8L)
         val coinReward = computeSolCoinReward(durationMin, durationMin)
 
         return if (succeeded) {
@@ -739,22 +739,28 @@ object ExpeditionEngine {
         slot: ItemSlot,
         tier: ForgeBlueprintTier,
         heroLevel: Int,
-        chosenElement: ElementalAffinity? = null
+        chosenElement: ElementalAffinity? = null,
+        guaranteedMasterwork: Boolean = false
     ): InventoryItem {
         val safeLvl = heroLevel.coerceAtLeast(1)
-        val critForgeUpgrade = Random.nextFloat() < 0.22f
+        val critForgeUpgrade = guaranteedMasterwork || Random.nextFloat() < 0.22f
         val finalRarity = if (critForgeUpgrade) {
             when (tier.baseRarity) {
                 ItemRarity.COMMON -> ItemRarity.RARE
                 ItemRarity.RARE -> ItemRarity.EPIC
                 ItemRarity.EPIC -> ItemRarity.SOLAR
-                else -> ItemRarity.SOLAR
+                ItemRarity.SOLAR -> ItemRarity.ULTRA_RARE
+                else -> ItemRarity.ULTRA_RARE
             }
         } else {
             tier.baseRarity
         }
         val effectiveTier = tier.powerScalar * (if (critForgeUpgrade) 1.18f else 1.0f)
-        val sourceLabel = if (critForgeUpgrade) "Masterwork Critical Forge (${tier.label})" else "Blacksmith Anvil (${tier.label})"
+        val sourceLabel = when {
+            guaranteedMasterwork -> "Starforged Masterwork Anvil (${tier.label})"
+            critForgeUpgrade -> "Masterwork Critical Forge (${tier.label})"
+            else -> "Blacksmith Anvil (${tier.label})"
+        }
         val baseItem = when (slot) {
             ItemSlot.WEAPON -> buildWeaponDrop(userId, safeLvl, finalRarity, effectiveTier, sourceLabel)
             ItemSlot.ARMOR -> buildArmorDrop(userId, safeLvl, finalRarity, effectiveTier, sourceLabel)

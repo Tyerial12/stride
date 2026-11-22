@@ -57,9 +57,11 @@ import com.example.data.model.InventoryItem
 import com.example.data.model.ItemSlot
 import com.example.data.model.LootChest
 import com.example.data.model.OwnedPet
+import com.example.data.model.WorldFogState
 import com.example.data.model.currentCalendarDateKey
 import com.example.domain.BattleMode
 import com.example.domain.BattleState
+import com.example.domain.ClassSkillCatalog
 import com.example.domain.CombatEngine
 import com.example.domain.EnemyIntentType
 import com.example.domain.ExpeditionEngine
@@ -91,6 +93,7 @@ fun BattleScreen(
     onEngageBattle: (Boolean) -> Unit,
     onStrike: () -> Unit,
     onSolarSkill: () -> Unit,
+    onClassActiveSkill: (Int) -> Unit = {},
     onUltimateCombo: () -> Unit = {},
     onGuard: () -> Unit,
     onUseElixir: () -> Unit,
@@ -103,6 +106,7 @@ fun BattleScreen(
     sleepSourceLabel: String = "",
     activeSleepMinutes: Long = 0L,
     onWakeHero: () -> Unit = {},
+    worldFog: WorldFogState = WorldFogState(),
     modifier: Modifier = Modifier
 ) {
     val ext = LocalSolstrideColors.current
@@ -393,7 +397,8 @@ fun BattleScreen(
                     equippedPet = equippedPet,
                     compact = true,
                     isSleeping = isHeroSleeping,
-                    sleepSourceLabel = sleepSourceLabel
+                    sleepSourceLabel = sleepSourceLabel,
+                    worldFog = worldFog
                 )
             }
 
@@ -531,7 +536,8 @@ fun BattleScreen(
                 inventory = inventory,
                 equippedPet = equippedPet,
                 battle = battle,
-                enemy = enemy
+                enemy = enemy,
+                worldFog = worldFog
             )
         }
 
@@ -733,10 +739,84 @@ fun BattleScreen(
             }
         }
 
-        // Oversized High-Contrast Tactical Command Pad (including Ultimate + Pet Combo!)
+        // Oversized High-Contrast Tactical Command Pad (Class Active Skills + Ultimate & Pet Combo!)
         item {
             val ultimateReady = battle.valor >= 100 || battle.petSynergy >= 100
+            val activeClassSkills = remember(profile.heroClass) {
+                ClassSkillCatalog.activeSkillsFor(profile.resolvedClass())
+            }
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (worldFog.fogCritBonusPct > 0 || worldFog.restedClarityBattlesLeft > 0 || worldFog.fogLanternCharges > 0) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                    ) {
+                        val buffs = buildList {
+                            if (worldFog.fogCritBonusPct > 0) add("Fog Clarity +${worldFog.fogCritBonusPct}% Crit")
+                            if (worldFog.restedClarityBattlesLeft > 0) add("Rested Clarity +${worldFog.restedXpBonusPct}% XP (${worldFog.restedClarityBattlesLeft}B)")
+                            if (worldFog.fogLanternCharges > 0) add("Fog Lantern (${worldFog.fogLanternCharges})")
+                        }.joinToString(" • ")
+                        Text(
+                            text = "World Buffs: $buffs",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = JetBrainsMonoFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+
+                // 3 Class Active Skills Row (Unlocked by Level, Upgraded by Sol Coins)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    activeClassSkills.forEachIndexed { idx, skill ->
+                        val unlocked = skill.isUnlockedAt(profile.level.toInt())
+                        val rank = ClassSkillCatalog.effectiveRank(profile, skill)
+                        val cooldown = battle.skillCooldowns.getOrElse(idx) { 0 }
+                        val canCast = !expeditionLocked &&
+                            unlocked &&
+                            cooldown == 0 &&
+                            battle.valor >= skill.valorCost
+
+                        Button(
+                            onClick = { onClassActiveSkill(idx) },
+                            enabled = canCast,
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(62.dp)
+                                .testTag("battle_class_skill_$idx"),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.secondary,
+                                contentColor = MaterialTheme.colorScheme.onSecondary
+                            )
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = skill.name,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    text = when {
+                                        !unlocked -> "Lv.${skill.unlockLevel} Lock"
+                                        cooldown > 0 -> "CD ${cooldown}T"
+                                        else -> "R$rank • ${skill.valorCost}V"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -765,15 +845,16 @@ fun BattleScreen(
                             .height(58.dp)
                             .testTag("battle_skill_button"),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.secondary,
-                            contentColor = MaterialTheme.colorScheme.onSecondary
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                         )
                     ) {
                         Icon(Icons.Filled.Bolt, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (battle.valor >= 100) "Overdrive!" else "Skill (20)",
-                            style = MaterialTheme.typography.titleMedium
+                            text = if (battle.valor >= 100) "Solar Surge!" else "Surge (20 EN)",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }

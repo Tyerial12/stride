@@ -13,30 +13,65 @@ import java.util.TimeZone
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+import androidx.annotation.Keep
+
 enum class HeroClass(
     val displayTitle: String,
     val subtitle: String,
     val perkSummary: String,
-    val defaultAffinity: ElementalAffinity
+    val defaultAffinity: ElementalAffinity,
+    val starterWeaponName: String,
+    val accentHex: Long
 ) {
     VANGUARD(
         displayTitle = "Vanguard",
         subtitle = "Solar Shieldbearer",
         perkSummary = "+20% Guard Mitigation & +15% Defense",
-        defaultAffinity = ElementalAffinity.SOLAR
+        defaultAffinity = ElementalAffinity.SOLAR,
+        starterWeaponName = "Sun-Worn Broadsword",
+        accentHex = 0xFFD97706L
     ),
-    STRIDER(
-        displayTitle = "Strider",
-        subtitle = "Gale Horizon Scout",
-        perkSummary = "+20% Step Energy Gain & +12% Crit Chance",
-        defaultAffinity = ElementalAffinity.FROST
+    ARCANIST(
+        displayTitle = "Arcanist",
+        subtitle = "Pyre & Astral Spellweaver",
+        perkSummary = "+25% Active Skill DMG & Elemental Burn Mastery",
+        defaultAffinity = ElementalAffinity.EMBER,
+        starterWeaponName = "Apprentice Ember Staff",
+        accentHex = 0xFF7C3AEDL
     ),
-    SUNBLADE(
-        displayTitle = "Sunblade",
-        subtitle = "Astral Arcanist",
-        perkSummary = "+25% Solar Skill Overdrive Damage",
-        defaultAffinity = ElementalAffinity.EMBER
-    )
+    RANGER(
+        displayTitle = "Ranger",
+        subtitle = "Gale Horizon Marksman",
+        perkSummary = "+14% Crit Chance & +8% Expedition Survival",
+        defaultAffinity = ElementalAffinity.FROST,
+        starterWeaponName = "Weathered Yew Bow",
+        accentHex = 0xFF0D9488L
+    ),
+    SHADOWBLADE(
+        displayTitle = "Shadowblade",
+        subtitle = "Eclipse Twin-Dagger Assassin",
+        perkSummary = "+14% Armor Pierce & +10% Lifesteal",
+        defaultAffinity = ElementalAffinity.VOID,
+        starterWeaponName = "Worn Iron Twin-Dirk",
+        accentHex = 0xFFE11D48L
+    );
+
+    val title: String get() = displayTitle
+    val roleTag: String get() = subtitle
+    val passiveSummary: String get() = perkSummary
+
+    companion object {
+        /**
+         * Resolves both the 4 remade classes and legacy saved class names (STRIDER -> RANGER, SUNBLADE -> ARCANIST).
+         */
+        fun fromRaw(raw: String?): HeroClass = when (raw?.trim()?.uppercase(Locale.US)) {
+            "VANGUARD" -> VANGUARD
+            "ARCANIST", "SUNBLADE" -> ARCANIST
+            "RANGER", "STRIDER" -> RANGER
+            "SHADOWBLADE" -> SHADOWBLADE
+            else -> VANGUARD
+        }
+    }
 }
 
 enum class ElementalAffinity(
@@ -160,11 +195,11 @@ enum class ClassSpecialization(
     ),
     GALE_RANGER(
         id = "GALE_RANGER",
-        baseClass = HeroClass.STRIDER,
-        title = "Gale Horizon Ranger",
+        baseClass = HeroClass.RANGER,
+        title = "Gale Horizon Marksman",
         affinity = ElementalAffinity.FROST,
         unlockLevel = 3,
-        passiveSummary = "+14% Crit Chance, +20% Step Energy & Frostbite Volley",
+        passiveSummary = "+14% Crit Chance, +10% Armor Pierce & Frostbite Volley",
         ultimateName = "Glacial Tempest Volley",
         ultimateDescription = "320% Frost multi-hit DMG + inflicts 3-turn Frostbite (-25% Enemy ATK)",
         atkMultBonus = 0.14f,
@@ -174,9 +209,25 @@ enum class ClassSpecialization(
         pierceBonusPct = 10,
         regenBonusHp = 4
     ),
+    STORM_WARDEN(
+        id = "STORM_WARDEN",
+        baseClass = HeroClass.RANGER,
+        title = "Suntrail Warden",
+        affinity = ElementalAffinity.TERRA,
+        unlockLevel = 3,
+        passiveSummary = "+14% DEF, +12% ATK & +10 Turn Regen with Snaring Shot",
+        ultimateName = "Shatterthorn Barrage",
+        ultimateDescription = "300% Terra DMG + inflicts 1-turn Stun & heals 18% Max HP",
+        atkMultBonus = 0.12f,
+        defMultBonus = 0.14f,
+        critBonusPct = 8,
+        lifestealBonusPct = 6,
+        pierceBonusPct = 10,
+        regenBonusHp = 10
+    ),
     MIRAGE_ASSASSIN(
         id = "MIRAGE_ASSASSIN",
-        baseClass = HeroClass.STRIDER,
+        baseClass = HeroClass.SHADOWBLADE,
         title = "Mirage Eclipse Assassin",
         affinity = ElementalAffinity.VOID,
         unlockLevel = 3,
@@ -190,9 +241,25 @@ enum class ClassSpecialization(
         pierceBonusPct = 20,
         regenBonusHp = 0
     ),
+    NIGHTFALL_REAPER(
+        id = "NIGHTFALL_REAPER",
+        baseClass = HeroClass.SHADOWBLADE,
+        title = "Cinderblade Reaper",
+        affinity = ElementalAffinity.EMBER,
+        unlockLevel = 3,
+        passiveSummary = "+20% ATK, +14% Crit & Scorching Shadow Flurry",
+        ultimateName = "Ashfall Thousand Cuts",
+        ultimateDescription = "345% Ember DMG + inflicts 3-turn Scorch Burn & Armor Sunder",
+        atkMultBonus = 0.20f,
+        defMultBonus = 0.04f,
+        critBonusPct = 14,
+        lifestealBonusPct = 8,
+        pierceBonusPct = 14,
+        regenBonusHp = 0
+    ),
     DAWN_ARCANIST(
         id = "DAWN_ARCANIST",
-        baseClass = HeroClass.SUNBLADE,
+        baseClass = HeroClass.ARCANIST,
         title = "Dawn Pyre Arcanist",
         affinity = ElementalAffinity.EMBER,
         unlockLevel = 3,
@@ -208,7 +275,7 @@ enum class ClassSpecialization(
     ),
     ECLIPSE_INQUISITOR(
         id = "ECLIPSE_INQUISITOR",
-        baseClass = HeroClass.SUNBLADE,
+        baseClass = HeroClass.ARCANIST,
         title = "Eclipse Void Inquisitor",
         affinity = ElementalAffinity.VOID,
         unlockLevel = 3,
@@ -442,9 +509,16 @@ enum class HeroTitleSpec(
 }
 
 data class HardcoreRpgState(
-    val sunsteelOre: Long = 25L,
-    val aetherHerbs: Long = 18L,
-    val elementalEssence: Long = 12L,
+    val sunsteelOre: Long = 0L,
+    val aetherHerbs: Long = 0L,
+    val elementalEssence: Long = 0L,
+    val starforgedIngots: Long = 0L,
+    val fogLanternCharges: Int = 0,
+    val restedClarityBattlesLeft: Int = 0,
+    val restedClarityPct: Int = 0,
+    val realmFogStepsMap: Map<String, Int> = emptyMap(),
+    val townMerchantDateKey: String = "",
+    val townMerchantPurchasedMap: Map<String, Int> = emptyMap(),
     val specializationId: String = "",
     val equippedTitleId: String = HeroTitleSpec.WAYFARER.name,
     val hardcoreOathEnabled: Boolean = false,
@@ -456,10 +530,7 @@ data class HardcoreRpgState(
     val shrineBattlesLeft: Int = 0,
     val itemDurabilityMap: Map<String, Int> = emptyMap(),
     val bestiaryDefeatsMap: Map<String, Int> = emptyMap(),
-    val unlockedRunesMap: Map<String, Int> = mapOf(
-        ElementalAffinity.SOLAR.name to 1,
-        ElementalAffinity.EMBER.name to 1
-    )
+    val unlockedRunesMap: Map<String, Int> = emptyMap()
 ) {
     fun durabilityFor(itemId: String): Int {
         if (itemId.isBlank()) return 100
@@ -483,14 +554,26 @@ data class HardcoreRpgState(
     fun activeMercenary(): MercenaryContractSpec =
         if (mercenaryBattlesLeft > 0) MercenaryContractSpec.fromId(mercenaryContractId)
         else MercenaryContractSpec.NONE
+
+    fun realmFogSteps(realmNumber: Int): Int =
+        (realmFogStepsMap[realmNumber.toString()] ?: 0).coerceAtLeast(0)
+
+    fun merchantPurchasesToday(offerId: String, todayKey: String): Int =
+        if (townMerchantDateKey == todayKey) (townMerchantPurchasedMap[offerId] ?: 0).coerceAtLeast(0) else 0
+
+    fun townPurchasesToday(offerId: String, todayKey: String): Int =
+        merchantPurchasesToday(offerId, todayKey)
 }
 
+@Keep
 @IgnoreExtraProperties
 data class HeroProfile(
     @DocumentId val id: String = "",
     val userId: String = "",
     val displayName: String = "Solar Vanguard",
     val heroClass: String = HeroClass.VANGUARD.name,
+    val avatarConfig: String = HeroAvatarConfig.DEFAULT_RAW,
+    val characterCreated: Boolean = false,
     val level: Long = 1L,
     val xp: Long = 0L,
     val xpToNextLevel: Long = 120L,
@@ -503,8 +586,8 @@ data class HeroProfile(
     val strideEnergy: Long = 40L,
     val maxStrideEnergy: Long = 100L,
     val encounterProgress: Long = 35L,
-    val sunshards: Long = 75L,
-    val solCoins: Long = 0L,
+    val sunshards: Long = 0L,
+    val solCoins: Long = 20L,
     val totalSteps: Long = 0L,
     val weeklySteps: Long = 0L,
     val weekKey: String = currentIsoWeekKey(),
@@ -533,8 +616,9 @@ data class HeroProfile(
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
-    fun resolvedClass(): HeroClass =
-        HeroClass.entries.firstOrNull { it.name == heroClass } ?: HeroClass.VANGUARD
+    fun resolvedClass(): HeroClass = HeroClass.fromRaw(heroClass)
+
+    fun resolvedAvatar(): HeroAvatarConfig = HeroAvatarConfig.parse(avatarConfig)
 
     fun hasActiveExpedition(): Boolean =
         activeExpeditionDurationMin > 0L && activeExpeditionEndMs > 0L
@@ -645,7 +729,7 @@ data class InventoryItem(
     }
 
     fun salvageSunshards(): Long {
-        val base = 15L + (upgradeLevel * 10L)
+        val base = 6L + (upgradeLevel * 4L)
         return (base * resolvedRarity().multiplier).toLong()
     }
 }
@@ -666,6 +750,7 @@ data class LootChest(
         LootChestTier.entries.firstOrNull { it.name == chestTier } ?: LootChestTier.HIGHLAND
 }
 
+@Keep
 @IgnoreExtraProperties
 data class LeaderboardEntry(
     @DocumentId val id: String = "",
@@ -683,8 +768,7 @@ data class LeaderboardEntry(
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
-    fun resolvedClass(): HeroClass =
-        HeroClass.entries.firstOrNull { it.name == heroClass } ?: HeroClass.VANGUARD
+    fun resolvedClass(): HeroClass = HeroClass.fromRaw(heroClass)
 }
 
 data class GearSetBonus(
@@ -854,8 +938,23 @@ fun computeDerivedStats(
         }
     }
 
-    if (heroClass == HeroClass.STRIDER) critPct += 12
-    if (heroClass == HeroClass.SUNBLADE) solarSurgePct += 25
+    when (heroClass) {
+        HeroClass.VANGUARD -> {}
+        HeroClass.ARCANIST -> solarSurgePct += 25
+        HeroClass.RANGER -> {
+            critPct += 14
+            expWardPct += 8
+        }
+        HeroClass.SHADOWBLADE -> {
+            piercePct += 14
+            lifestealPct += 10
+        }
+    }
+
+    // Balanced Step Fog-of-War & Watch Sleep Rested Clarity bonuses
+    val realmFogState = ProgressionEngine.computeWorldFogState(profile, hardcoreState, 0L, false)
+    critPct += realmFogState.fogCritBonusPct
+    expWardPct += realmFogState.restedExpeditionWardBonusPct
 
     // Apply Specialization, Skill Tree, Title, Codex & Mercenary bonuses
     val specUnlocked = profile.level >= spec.unlockLevel
@@ -873,7 +972,7 @@ fun computeDerivedStats(
     solarSurgePct = (solarSurgePct + skillBonus.solarSurgePct).coerceIn(0, 200)
     dmgRedPct = (dmgRedPct + skillBonus.damageReductionPct).coerceIn(0, 65)
     thornsPct = (thornsPct + skillBonus.thornsPct).coerceIn(0, 90)
-    expWardPct = expWardPct.coerceIn(0, 55)
+    expWardPct = expWardPct.coerceIn(0, 60)
     turnRegen = (turnRegen + skillBonus.turnRegenHp).coerceIn(0, 300)
 
     val rawAtk = 12 + (profile.might.toInt() * 3) + (profile.level.toInt() * 2) +
@@ -946,7 +1045,7 @@ fun computeDerivedStats(
         expeditionWardPercent = expWardPct,
         turnRegenHp = turnRegen,
         stepEnergyMultiplier = petBonus.stepEnergyMultiplier * skillBonus.stepEnergyMultiplier,
-        totalXpMultiplier = petBonus.xpMultiplier * skillBonus.xpMultiplier * skillBonus.prestigeRewardMultiplier,
+        totalXpMultiplier = petBonus.xpMultiplier * skillBonus.xpMultiplier * skillBonus.prestigeRewardMultiplier * (1.0f + realmFogState.restedXpBonusPct / 100f),
         totalSunshardMultiplier = petBonus.sunshardMultiplier * skillBonus.sunshardMultiplier * skillBonus.prestigeRewardMultiplier,
         setBonus = setBonus,
         petBonusSummary = petBonus.summaryText,

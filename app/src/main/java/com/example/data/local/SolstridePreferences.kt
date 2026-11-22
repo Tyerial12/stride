@@ -78,6 +78,15 @@ class SolstridePreferences(private val context: Context) {
 
         // Single-Use Treasure Chest Consumption Ledger
         val CONSUMED_CHEST_IDS_RAW = stringPreferencesKey("rpg_consumed_chest_ids_raw")
+
+        // Step/Sleep Fog-of-War & Town Merchant Special Materials State
+        val STARFORGED_INGOTS = longPreferencesKey("rpg_starforged_ingots")
+        val FOG_LANTERN_CHARGES = intPreferencesKey("rpg_fog_lantern_charges")
+        val RESTED_CLARITY_BATTLES = intPreferencesKey("rpg_rested_clarity_battles")
+        val RESTED_CLARITY_PCT = intPreferencesKey("rpg_rested_clarity_pct")
+        val REALM_FOG_STEPS_RAW = stringPreferencesKey("rpg_realm_fog_steps_raw")
+        val TOWN_MERCHANT_DATE_KEY = stringPreferencesKey("rpg_town_merchant_date_key")
+        val TOWN_MERCHANT_PURCHASED_RAW = stringPreferencesKey("rpg_town_merchant_purchased_raw")
     }
 
     val settingsFlow: Flow<SolstrideSettings> = context.solstrideDataStore.data.map { prefs ->
@@ -102,9 +111,16 @@ class SolstridePreferences(private val context: Context) {
 
     val hardcoreRpgStateFlow: Flow<HardcoreRpgState> = context.solstrideDataStore.data.map { prefs ->
         HardcoreRpgState(
-            sunsteelOre = (prefs[Keys.SUNSTEEL_ORE] ?: 25L).coerceAtLeast(0L),
-            aetherHerbs = (prefs[Keys.AETHER_HERBS] ?: 18L).coerceAtLeast(0L),
-            elementalEssence = (prefs[Keys.ELEMENTAL_ESSENCE] ?: 12L).coerceAtLeast(0L),
+            sunsteelOre = (prefs[Keys.SUNSTEEL_ORE] ?: 0L).coerceAtLeast(0L),
+            aetherHerbs = (prefs[Keys.AETHER_HERBS] ?: 0L).coerceAtLeast(0L),
+            elementalEssence = (prefs[Keys.ELEMENTAL_ESSENCE] ?: 0L).coerceAtLeast(0L),
+            starforgedIngots = (prefs[Keys.STARFORGED_INGOTS] ?: 0L).coerceAtLeast(0L),
+            fogLanternCharges = (prefs[Keys.FOG_LANTERN_CHARGES] ?: 0).coerceIn(0, 99),
+            restedClarityBattlesLeft = (prefs[Keys.RESTED_CLARITY_BATTLES] ?: 0).coerceIn(0, 10),
+            restedClarityPct = (prefs[Keys.RESTED_CLARITY_PCT] ?: 0).coerceIn(0, 100),
+            realmFogStepsMap = parseKeyIntMap(prefs[Keys.REALM_FOG_STEPS_RAW] ?: ""),
+            townMerchantDateKey = prefs[Keys.TOWN_MERCHANT_DATE_KEY] ?: "",
+            townMerchantPurchasedMap = parseKeyIntMap(prefs[Keys.TOWN_MERCHANT_PURCHASED_RAW] ?: ""),
             specializationId = prefs[Keys.SPECIALIZATION_ID] ?: "",
             equippedTitleId = prefs[Keys.EQUIPPED_TITLE_ID] ?: HeroTitleSpec.WAYFARER.id,
             hardcoreOathEnabled = prefs[Keys.HARDCORE_OATH_ENABLED] ?: false,
@@ -116,9 +132,7 @@ class SolstridePreferences(private val context: Context) {
             shrineBattlesLeft = (prefs[Keys.SHRINE_BATTLES_LEFT] ?: 0).coerceAtLeast(0),
             itemDurabilityMap = parseKeyIntMap(prefs[Keys.ITEM_DURABILITY_RAW] ?: ""),
             bestiaryDefeatsMap = parseKeyIntMap(prefs[Keys.BESTIARY_DEFEATS_RAW] ?: ""),
-            unlockedRunesMap = parseKeyIntMap(
-                prefs[Keys.UNLOCKED_RUNES_RAW] ?: "${ElementalAffinity.SOLAR.name}:1,${ElementalAffinity.EMBER.name}:1"
-            )
+            unlockedRunesMap = parseKeyIntMap(prefs[Keys.UNLOCKED_RUNES_RAW] ?: "")
         )
     }
 
@@ -159,6 +173,13 @@ class SolstridePreferences(private val context: Context) {
             prefs[Keys.SUNSTEEL_ORE] = next.sunsteelOre.coerceAtLeast(0L)
             prefs[Keys.AETHER_HERBS] = next.aetherHerbs.coerceAtLeast(0L)
             prefs[Keys.ELEMENTAL_ESSENCE] = next.elementalEssence.coerceAtLeast(0L)
+            prefs[Keys.STARFORGED_INGOTS] = next.starforgedIngots.coerceAtLeast(0L)
+            prefs[Keys.FOG_LANTERN_CHARGES] = next.fogLanternCharges.coerceIn(0, 99)
+            prefs[Keys.RESTED_CLARITY_BATTLES] = next.restedClarityBattlesLeft.coerceIn(0, 10)
+            prefs[Keys.RESTED_CLARITY_PCT] = next.restedClarityPct.coerceIn(0, 100)
+            prefs[Keys.REALM_FOG_STEPS_RAW] = encodeKeyIntMap(next.realmFogStepsMap)
+            prefs[Keys.TOWN_MERCHANT_DATE_KEY] = next.townMerchantDateKey
+            prefs[Keys.TOWN_MERCHANT_PURCHASED_RAW] = encodeKeyIntMap(next.townMerchantPurchasedMap)
             prefs[Keys.SPECIALIZATION_ID] = next.specializationId
             prefs[Keys.EQUIPPED_TITLE_ID] = next.equippedTitleId
             prefs[Keys.HARDCORE_OATH_ENABLED] = next.hardcoreOathEnabled
@@ -177,9 +198,16 @@ class SolstridePreferences(private val context: Context) {
     suspend fun resetAllRpgAndStepProgress() {
         context.solstrideDataStore.edit { prefs ->
             prefs[Keys.PEDOMETER_DAILY_STEPS] = 0L
-            prefs[Keys.SUNSTEEL_ORE] = 25L
-            prefs[Keys.AETHER_HERBS] = 18L
-            prefs[Keys.ELEMENTAL_ESSENCE] = 12L
+            prefs[Keys.SUNSTEEL_ORE] = 0L
+            prefs[Keys.AETHER_HERBS] = 0L
+            prefs[Keys.ELEMENTAL_ESSENCE] = 0L
+            prefs[Keys.STARFORGED_INGOTS] = 0L
+            prefs[Keys.FOG_LANTERN_CHARGES] = 0
+            prefs[Keys.RESTED_CLARITY_BATTLES] = 0
+            prefs[Keys.RESTED_CLARITY_PCT] = 0
+            prefs[Keys.REALM_FOG_STEPS_RAW] = ""
+            prefs[Keys.TOWN_MERCHANT_DATE_KEY] = ""
+            prefs[Keys.TOWN_MERCHANT_PURCHASED_RAW] = ""
             prefs[Keys.SPECIALIZATION_ID] = ""
             prefs[Keys.EQUIPPED_TITLE_ID] = HeroTitleSpec.WAYFARER.id
             prefs[Keys.HARDCORE_OATH_ENABLED] = false
@@ -191,7 +219,7 @@ class SolstridePreferences(private val context: Context) {
             prefs[Keys.SHRINE_BATTLES_LEFT] = 0
             prefs[Keys.ITEM_DURABILITY_RAW] = ""
             prefs[Keys.BESTIARY_DEFEATS_RAW] = ""
-            prefs[Keys.UNLOCKED_RUNES_RAW] = "${ElementalAffinity.SOLAR.name}:1,${ElementalAffinity.EMBER.name}:1"
+            prefs[Keys.UNLOCKED_RUNES_RAW] = ""
             prefs[Keys.CONSUMED_CHEST_IDS_RAW] = ""
         }
     }

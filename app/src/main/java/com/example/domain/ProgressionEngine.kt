@@ -1,9 +1,12 @@
 package com.example.domain
 
 import com.example.data.model.ElementalAffinity
+import com.example.data.model.HardcoreRpgState
 import com.example.data.model.HeroProfile
 import com.example.data.model.LootChest
 import com.example.data.model.LootChestTier
+import com.example.data.model.PetType
+import com.example.data.model.WorldFogState
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -80,8 +83,10 @@ data class QuestSpec(
     val targetCount: Long,
     val sunshardReward: Long,
     val xpReward: Long,
+    val solCoinReward: Long = 0L,
     val chestRewardTier: LootChestTier? = null,
-    val chestUltraRarePct: Int = 0
+    val chestUltraRarePct: Int = 0,
+    val companionReward: PetType? = null
 )
 
 data class QuestStatus(
@@ -151,6 +156,31 @@ data class BestiaryEntrySpec(
     val bossName: String get() = name
     val realmNumber: Int
         get() = id.removePrefix("boss_realm_").toIntOrNull() ?: 10
+}
+
+data class PrestigeConditionStatus(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val currentValue: Long,
+    val targetValue: Long,
+    val unitSuffix: String = ""
+) {
+    val isMet: Boolean get() = currentValue >= targetValue
+    val progressFraction: Float
+        get() = (currentValue.toFloat() / targetValue.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
+}
+
+data class PrestigeRequirementEvaluation(
+    val nextPrestigeLevel: Long,
+    val isMaxPrestigeReached: Boolean,
+    val conditions: List<PrestigeConditionStatus>,
+    val solCoinTributeCost: Long
+) {
+    val metCount: Int get() = conditions.count { it.isMet }
+    val totalCount: Int get() = conditions.size
+    val allConditionsMet: Boolean get() = !isMaxPrestigeReached && conditions.all { it.isMet }
+    val firstUnmetCondition: PrestigeConditionStatus? get() = conditions.firstOrNull { !it.isMet }
 }
 
 object ProgressionEngine {
@@ -297,7 +327,7 @@ object ProgressionEngine {
             subtitle = "Wager Sol Coins at the forbidden astrolabe monolith",
             energyCost = 0L,
             solCoinCost = 15L,
-            effectSummary = "60% chance: +35 Sol Coins & +1 Elemental Rune • 40% chance: -20% HP & +95 Sunshards"
+            effectSummary = "60% chance: +35 Sol Coins & +1 Elemental Rune • 40% chance: -20% HP & +40 Sunshards"
         )
     )
 
@@ -368,7 +398,7 @@ object ProgressionEngine {
         BlackMarketOfferSpec(
             id = "bm_forge_material_crate",
             title = "Sunsteel & Aether Supply Crate",
-            subtitle = "Delivers +35 Sunsteel Ore, +28 Aether Herbs, +10 Elemental Essence & +120 Sunshards.",
+            subtitle = "Delivers +35 Sunsteel Ore, +28 Aether Herbs, +10 Elemental Essence & +50 Sunshards.",
             solCoinCost = 12L,
             badgeText = "CRAFTING BUNDLE"
         ),
@@ -512,48 +542,161 @@ object ProgressionEngine {
         }.joinToString(",")
     }
 
+    const val REALM_FOG_FULL_CLEAR_STEPS: Int = 2000
+
     fun computeSkillTreeBonuses(profile: HeroProfile): ComputedSkillTreeBonuses {
-        val ranks = parseSkillRanks(profile.skillRanks)
-        val r0 = ranks[0]
-        val r1 = ranks[1]
-        val r2 = ranks[2]
-        val r3 = ranks[3]
-        val r4 = ranks[4]
-        val r5 = ranks[5]
-        val r6 = ranks[6]
-        val r7 = ranks[7]
-        val r8 = ranks[8]
+        return ClassSkillCatalog.computeClassPassiveBonuses(profile)
+    }
 
-        val pLvl = profile.prestigeLevel.toInt().coerceIn(0, MAX_PRESTIGE_LEVEL.toInt())
-        val prestigeStatMult = 1.0f + (pLvl * 0.15f)
-        val prestigeRewardMult = 1.0f + (pLvl * 0.10f)
-        val prestigeWard = (pLvl * 3).coerceAtMost(25)
+    /**
+     * Computes dynamic Step & Sleep Fog-of-War RPG effects:
+     * - Walking real steps clears the current Realm's mystic mist (0..2,000 steps = 0..100%),
+     *   granting up to +10% Fog Clarity Crit Chance (boosted by Fog-Lantern Oil charges).
+     * - Real-life Watch Sleep wraps the sanctuary in Dream-Mist and grants Rested Clarity
+     *   (+10% Expedition Survival & +12% Battle XP for up to 3 battles) alongside max-50 Sol Coins.
+     */
+    fun computeWorldFogState(
+        profile: HeroProfile,
+        hardcoreState: HardcoreRpgState,
+        todaySteps: Long = 0L,
+        isHeroSleeping: Boolean = false
+    ): WorldFogState {
+        val realmNum = profile.currentRealm.toInt().coerceIn(1, MAX_REALM.toInt())
+        val persistedRealmSteps = hardcoreState.realmFogSteps(realmNum)
+        val effectiveSteps = maxOf(persistedRealmSteps, todaySteps.toInt().coerceAtMost(REALM_FOG_FULL_CLEAR_STEPS))
+            .coerceIn(0, REALM_FOG_FULL_CLEAR_STEPS)
 
-        return ComputedSkillTreeBonuses(
-            flatAttack = (r0 * 4) + (r2 * 3),
-            flatDefense = r3 * 3,
-            flatMaxHp = (r3 * 18) + (r5 * 12),
-            flatMaxEnergy = r6 * 6,
-            critChancePct = r0 * 2,
-            armorPiercePct = r1 * 4,
-            lifestealPct = r2 * 2,
-            solarSurgePct = r1 * 6,
-            damageReductionPct = r4 * 2,
-            thornsPct = r4 * 4,
-            turnRegenHp = r5 * 4,
-            expeditionWardPct = r7 * 3,
-            stepEnergyMultiplier = 1.0f + (r6 * 0.05f),
-            sunshardMultiplier = 1.0f + (r8 * 0.06f),
-            xpMultiplier = 1.0f + (r8 * 0.06f),
-            prestigeStatMultiplier = prestigeStatMult,
-            prestigeRewardMultiplier = prestigeRewardMult,
-            prestigeExpeditionWardPct = prestigeWard
+        val lanternActive = hardcoreState.fogLanternCharges > 0
+        val baseClearPct = ((effectiveSteps.toFloat() / REALM_FOG_FULL_CLEAR_STEPS.toFloat()) * 100f)
+            .roundToInt()
+            .coerceIn(0, 100)
+        val totalClearPct = (baseClearPct + if (lanternActive) 25 else 0).coerceIn(0, 100)
+
+        // Visual fog stays gentle and atmospheric (0.08f sunlit haze to 0.68f mystic fog)
+        val visualDensity = if (isHeroSleeping) {
+            0.52f
+        } else {
+            (0.68f - (totalClearPct / 100f) * 0.60f).coerceIn(0.08f, 0.68f)
+        }
+
+        // Balanced RPG clarity bonuses
+        val fogCritFromSteps = (totalClearPct / 10).coerceIn(0, 10)
+        val lanternCritBonus = if (lanternActive) 8 else 0
+        val fogCritTotal = (fogCritFromSteps + lanternCritBonus).coerceIn(0, 18)
+
+        val restedActive = hardcoreState.restedClarityBattlesLeft > 0 || isHeroSleeping
+        val restedRatio = if (isHeroSleeping) 1.0f else (hardcoreState.restedClarityPct.coerceIn(25, 100) / 100f)
+        val restedWardBonus = (if (restedActive) (10f * restedRatio).roundToInt().coerceIn(3, 10) else 0) +
+            (if (lanternActive) 6 else 0)
+        val restedXpBonus = if (restedActive) (12f * restedRatio).roundToInt().coerceIn(4, 12) else 0
+
+        val headline = when {
+            isHeroSleeping -> "Watch Dream-Mist • Generating Sol Coins & Rested Clarity"
+            lanternActive && totalClearPct >= 100 -> "Sunfire Lantern & Clear Skies • Peak Clarity (+${fogCritTotal}% Crit)"
+            totalClearPct >= 100 -> "Realm $realmNum Fog Cleared • Sunlit Clarity (+${fogCritTotal}% Crit)"
+            lanternActive -> "Fog-Lantern Lit (${hardcoreState.fogLanternCharges} left) • ${totalClearPct}% Clear"
+            hardcoreState.restedClarityBattlesLeft > 0 -> "Rested Dream Clarity (${hardcoreState.restedClarityBattlesLeft} fights) • Fog ${totalClearPct}% Clear"
+            totalClearPct >= 50 -> "Sunbeams Breaking Through • Realm Fog ${totalClearPct}% Cleared"
+            else -> "Mystic Fog Veils Realm $realmNum • Walk to Dispel (${totalClearPct}%)"
+        }
+
+        return WorldFogState(
+            realmNumber = realmNum,
+            realmStepsWalked = effectiveSteps,
+            realmStepsRequired = REALM_FOG_FULL_CLEAR_STEPS,
+            realmFogClearedPct = totalClearPct,
+            visualFogDensity = visualDensity,
+            isDreamMistActive = isHeroSleeping || hardcoreState.restedClarityBattlesLeft > 0,
+            restedClarityBattlesLeft = hardcoreState.restedClarityBattlesLeft,
+            restedClarityPct = hardcoreState.restedClarityPct,
+            fogLanternCharges = hardcoreState.fogLanternCharges,
+            fogCritBonusPct = fogCritTotal,
+            restedExpeditionWardBonusPct = restedWardBonus,
+            restedXpBonusPct = restedXpBonus,
+            statusHeadline = headline
+        )
+    }
+
+    fun evaluatePrestigeRequirements(profile: HeroProfile): PrestigeRequirementEvaluation {
+        val currentPrestige = profile.prestigeLevel.coerceAtLeast(0L)
+        if (currentPrestige >= MAX_PRESTIGE_LEVEL) {
+            return PrestigeRequirementEvaluation(
+                nextPrestigeLevel = MAX_PRESTIGE_LEVEL,
+                isMaxPrestigeReached = true,
+                conditions = emptyList(),
+                solCoinTributeCost = 0L
+            )
+        }
+
+        val reqLevel = (PRESTIGE_MIN_LEVEL + currentPrestige * 3L).coerceAtMost(60L)
+        val reqRealm = (PRESTIGE_ALT_REALM_CLEARED + currentPrestige).coerceAtMost(MAX_REALM)
+        val reqRealmName = realms.firstOrNull { it.realmNumber == reqRealm.toInt() }?.name ?: "Realm $reqRealm"
+        val reqBosses = 3L + currentPrestige * 3L
+        val reqSpireFloor = (3L + currentPrestige * 2L).coerceAtMost(50L)
+        val reqSteps = 5_000L + currentPrestige * 5_000L
+        val tributeCost = (40L + currentPrestige * 20L).coerceAtMost(300L)
+
+        val conditions = listOf(
+            PrestigeConditionStatus(
+                id = "hero_level",
+                title = "Hero Level $reqLevel",
+                subtitle = "Reach Level $reqLevel on this run (resets to Lv.1 on Ascension)",
+                currentValue = profile.level.coerceAtLeast(1L),
+                targetValue = reqLevel,
+                unitSuffix = "Lv"
+            ),
+            PrestigeConditionStatus(
+                id = "realm_conquest",
+                title = "Clear Realm $reqRealm ($reqRealmName)",
+                subtitle = "Defeat the Realm $reqRealm Guardian in Campaign",
+                currentValue = profile.highestRealmCleared.coerceAtLeast(0L),
+                targetValue = reqRealm,
+                unitSuffix = "Realms"
+            ),
+            PrestigeConditionStatus(
+                id = "true_bosses",
+                title = "Guardian Slayer ($reqBosses Bosses)",
+                subtitle = "Defeat $reqBosses Realm or True Bosses",
+                currentValue = profile.trueBossWins.coerceAtLeast(0L),
+                targetValue = reqBosses,
+                unitSuffix = "Wins"
+            ),
+            PrestigeConditionStatus(
+                id = "spire_floor",
+                title = "Sunspire Floor $reqSpireFloor",
+                subtitle = "Clear Floor $reqSpireFloor in the Endless Sunspire",
+                currentValue = profile.highestSpireFloor.coerceAtLeast(0L),
+                targetValue = reqSpireFloor,
+                unitSuffix = "Floor"
+            ),
+            PrestigeConditionStatus(
+                id = "pilgrim_steps",
+                title = "Wayfarer Pilgrimage",
+                subtitle = "Walk ${String.format(java.util.Locale.US, "%,d", reqSteps)} lifetime steps",
+                currentValue = profile.totalSteps.coerceAtLeast(0L),
+                targetValue = reqSteps,
+                unitSuffix = "Steps"
+            ),
+            PrestigeConditionStatus(
+                id = "sol_tribute",
+                title = "Ascension Tribute ($tributeCost Sol Coins)",
+                subtitle = "Spent to ignite the Solar Ascension altar",
+                currentValue = profile.solCoins.coerceAtLeast(0L),
+                targetValue = tributeCost,
+                unitSuffix = "Coins"
+            )
+        )
+
+        return PrestigeRequirementEvaluation(
+            nextPrestigeLevel = currentPrestige + 1L,
+            isMaxPrestigeReached = false,
+            conditions = conditions,
+            solCoinTributeCost = tributeCost
         )
     }
 
     fun canPrestige(profile: HeroProfile): Boolean {
-        return (profile.level >= PRESTIGE_MIN_LEVEL || profile.highestRealmCleared >= PRESTIGE_ALT_REALM_CLEARED) &&
-            profile.prestigeLevel < MAX_PRESTIGE_LEVEL
+        return evaluatePrestigeRequirements(profile).allConditionsMet
     }
 
     fun prestigeRomanNumeral(level: Int): String = when {
@@ -573,35 +716,48 @@ object ProgressionEngine {
 
     val questCatalog: List<QuestSpec> = listOf(
         QuestSpec(
+            id = "daily_fog_steps",
+            category = QuestCategory.DAILY,
+            title = "Dispel the Dawn Fog",
+            description = "Walk 2,000 steps today to clear Realm Fog & sharpen Crit Clarity",
+            targetCount = 2000L,
+            sunshardReward = 25L,
+            xpReward = 85L,
+            solCoinReward = 18L
+        ),
+        QuestSpec(
             id = "daily_battles_2",
             category = QuestCategory.DAILY,
-            title = "Canyon Skirmisher",
+            title = "Sunhaven Skirmisher",
             description = "Win 2 tactical battles today",
             targetCount = 2L,
-            sunshardReward = 55L,
+            sunshardReward = 22L,
             xpReward = 70L,
+            solCoinReward = 15L,
             chestRewardTier = LootChestTier.HIGHLAND,
             chestUltraRarePct = 15
         ),
         QuestSpec(
             id = "daily_expedition_1",
             category = QuestCategory.DAILY,
-            title = "Dawn Recon",
+            title = "Dawn Recon Bounty",
             description = "Complete 1 Timed Expedition today",
             targetCount = 1L,
-            sunshardReward = 75L,
+            sunshardReward = 30L,
             xpReward = 95L,
+            solCoinReward = 16L,
             chestRewardTier = LootChestTier.EXPEDITION,
             chestUltraRarePct = 25
         ),
         QuestSpec(
             id = "daily_chests_1",
             category = QuestCategory.DAILY,
-            title = "Relic Unsealer",
-            description = "Unseal 1 Treasure Chest today",
+            title = "Vault Unsealer",
+            description = "Unseal 1 single-use Treasure Chest today",
             targetCount = 1L,
-            sunshardReward = 50L,
-            xpReward = 60L
+            sunshardReward = 20L,
+            xpReward = 60L,
+            solCoinReward = 12L
         ),
         QuestSpec(
             id = "weekly_steps_5k",
@@ -609,8 +765,9 @@ object ProgressionEngine {
             title = "Highland Stride",
             description = "Walk 5,000 steps this week with your smart watch or phone",
             targetCount = 5000L,
-            sunshardReward = 160L,
+            sunshardReward = 70L,
             xpReward = 220L,
+            solCoinReward = 45L,
             chestRewardTier = LootChestTier.BOSS_VAULT,
             chestUltraRarePct = 35
         ),
@@ -620,10 +777,71 @@ object ProgressionEngine {
             title = "Sunspire Marathon",
             description = "Walk 15,000 steps this week",
             targetCount = 15000L,
-            sunshardReward = 340L,
+            sunshardReward = 140L,
             xpReward = 450L,
+            solCoinReward = 85L,
             chestRewardTier = LootChestTier.SPIRE_SOVEREIGN,
             chestUltraRarePct = 55
+        ),
+        QuestSpec(
+            id = "milestone_level_5",
+            category = QuestCategory.MILESTONE,
+            title = "Awakened Class Arts",
+            description = "Reach Hero Level 5 to unlock your 2nd Active Class Skill",
+            targetCount = 5L,
+            sunshardReward = 50L,
+            xpReward = 140L,
+            solCoinReward = 35L
+        ),
+        QuestSpec(
+            id = "milestone_level_8",
+            category = QuestCategory.MILESTONE,
+            title = "Highland Falconer",
+            description = "Reach Hero Level 8 to recruit the Epic Dune Falcon companion",
+            targetCount = 8L,
+            sunshardReward = 80L,
+            xpReward = 210L,
+            solCoinReward = 45L,
+            companionReward = PetType.DUNE_FALCON
+        ),
+        QuestSpec(
+            id = "milestone_level_12",
+            category = QuestCategory.MILESTONE,
+            title = "Master of Sunhaven",
+            description = "Reach Hero Level 12 to unlock your 3rd Signature Skill & earn Cinder Lynx",
+            targetCount = 12L,
+            sunshardReward = 115L,
+            xpReward = 320L,
+            solCoinReward = 75L,
+            chestRewardTier = LootChestTier.BOSS_VAULT,
+            chestUltraRarePct = 40,
+            companionReward = PetType.CINDER_LYNX
+        ),
+        QuestSpec(
+            id = "milestone_level_18",
+            category = QuestCategory.MILESTONE,
+            title = "Keeper of the Sunlit Oasis",
+            description = "Reach Hero Level 18 to recruit the Solar Oasis Tortoise companion",
+            targetCount = 18L,
+            sunshardReward = 190L,
+            xpReward = 480L,
+            solCoinReward = 100L,
+            chestRewardTier = LootChestTier.BOSS_VAULT,
+            chestUltraRarePct = 55,
+            companionReward = PetType.OASIS_TORTOISE
+        ),
+        QuestSpec(
+            id = "milestone_level_25",
+            category = QuestCategory.MILESTONE,
+            title = "Zenith Phoenix Ascendant",
+            description = "Reach Hero Level 25 to awaken the Legendary Solar Phoenix companion",
+            targetCount = 25L,
+            sunshardReward = 320L,
+            xpReward = 750L,
+            solCoinReward = 150L,
+            chestRewardTier = LootChestTier.SPIRE_SOVEREIGN,
+            chestUltraRarePct = 80,
+            companionReward = PetType.SOLAR_PHOENIX
         ),
         QuestSpec(
             id = "milestone_realm_1",
@@ -631,8 +849,9 @@ object ProgressionEngine {
             title = "Conqueror of Sunlit Dunes",
             description = "Clear Realm 1 (Defeat Helios Colossus at Stage 5)",
             targetCount = 1L,
-            sunshardReward = 150L,
+            sunshardReward = 60L,
             xpReward = 200L,
+            solCoinReward = 40L,
             chestRewardTier = LootChestTier.BOSS_VAULT,
             chestUltraRarePct = 35
         ),
@@ -642,8 +861,9 @@ object ProgressionEngine {
             title = "Sovereign of the Zenith Citadel",
             description = "Clear Realm 5 (Defeat Aurelius the Eternal)",
             targetCount = 5L,
-            sunshardReward = 450L,
+            sunshardReward = 180L,
             xpReward = 600L,
+            solCoinReward = 120L,
             chestRewardTier = LootChestTier.SPIRE_SOVEREIGN,
             chestUltraRarePct = 75
         ),
@@ -653,8 +873,9 @@ object ProgressionEngine {
             title = "Ascendant of Celestial Solaris",
             description = "Clear Realm 10 (Defeat Sol Invictus Prime)",
             targetCount = 10L,
-            sunshardReward = 1200L,
+            sunshardReward = 450L,
             xpReward = 1500L,
+            solCoinReward = 250L,
             chestRewardTier = LootChestTier.SPIRE_SOVEREIGN,
             chestUltraRarePct = 100
         ),
@@ -664,8 +885,9 @@ object ProgressionEngine {
             title = "Spire Challenger",
             description = "Clear Floor 5 of the Endless Spire Gauntlet",
             targetCount = 5L,
-            sunshardReward = 200L,
+            sunshardReward = 85L,
             xpReward = 260L,
+            solCoinReward = 55L,
             chestRewardTier = LootChestTier.SPIRE_SOVEREIGN,
             chestUltraRarePct = 45
         ),
@@ -675,8 +897,9 @@ object ProgressionEngine {
             title = "Spire Sovereign",
             description = "Clear Floor 15 of the Endless Spire Gauntlet",
             targetCount = 15L,
-            sunshardReward = 500L,
+            sunshardReward = 210L,
             xpReward = 650L,
+            solCoinReward = 130L,
             chestRewardTier = LootChestTier.SPIRE_SOVEREIGN,
             chestUltraRarePct = 85
         ),
@@ -686,18 +909,26 @@ object ProgressionEngine {
             title = "Bane of Guardians",
             description = "Win 5 True Boss Battles",
             targetCount = 5L,
-            sunshardReward = 240L,
+            sunshardReward = 100L,
             xpReward = 300L,
+            solCoinReward = 60L,
             chestRewardTier = LootChestTier.BOSS_VAULT,
             chestUltraRarePct = 50
         )
     )
 
-    fun evaluateQuests(profile: HeroProfile, todayKey: String): List<QuestStatus> {
+    fun evaluateQuests(
+        profile: HeroProfile,
+        todayKey: String,
+        todaySteps: Long = 0L,
+        hardcoreState: HardcoreRpgState = HardcoreRpgState()
+    ): List<QuestStatus> {
         val isSameDay = profile.dailyQuestDateKey == todayKey
         val dailyBattles = if (isSameDay) profile.dailyBattlesWon else 0L
         val dailyExps = if (isSameDay) profile.dailyExpeditionsDone else 0L
         val dailyChests = if (isSameDay) profile.dailyChestsOpened else 0L
+        val realmSteps = hardcoreState.realmFogSteps(profile.currentRealm.toInt()).toLong()
+        val dailyFogProgress = maxOf(todaySteps, realmSteps)
 
         return questCatalog.map { spec ->
             val claimKey = when (spec.category) {
@@ -706,10 +937,12 @@ object ProgressionEngine {
                 QuestCategory.MILESTONE -> spec.id
             }
             val current = when (spec.id) {
+                "daily_fog_steps" -> dailyFogProgress
                 "daily_battles_2" -> dailyBattles
                 "daily_expedition_1" -> dailyExps
                 "daily_chests_1" -> dailyChests
                 "weekly_steps_5k", "weekly_steps_15k" -> profile.weeklySteps
+                "milestone_level_5", "milestone_level_8", "milestone_level_12", "milestone_level_18", "milestone_level_25" -> profile.level
                 "milestone_realm_1", "milestone_realm_5", "milestone_realm_10" -> profile.highestRealmCleared
                 "milestone_spire_5", "milestone_spire_15" -> profile.highestSpireFloor
                 "milestone_bosses_5" -> profile.trueBossWins
