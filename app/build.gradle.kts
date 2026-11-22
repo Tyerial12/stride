@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.solstride.kxmrvq"
     minSdk = 24
     targetSdk = 36
-    versionCode = 48
-    versionName = "48.0"
+    versionCode = 49
+    versionName = "49.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
