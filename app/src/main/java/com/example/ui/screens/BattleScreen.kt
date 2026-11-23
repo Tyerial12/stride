@@ -50,6 +50,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import com.example.data.model.DerivedHeroStats
 import com.example.data.model.HardcoreRpgState
 import com.example.data.model.HeroProfile
@@ -57,6 +62,9 @@ import com.example.data.model.InventoryItem
 import com.example.data.model.ItemSlot
 import com.example.data.model.LootChest
 import com.example.data.model.OwnedPet
+import com.example.data.model.ParryGrade
+import com.example.data.model.WeeklyWorldBoss
+import com.example.data.model.WorldBossContribution
 import com.example.data.model.WorldFogState
 import com.example.data.model.currentCalendarDateKey
 import com.example.domain.BattleMode
@@ -70,9 +78,13 @@ import com.example.ui.components.AnimatedBattleStage
 import com.example.ui.components.ExpeditionLockBanner
 import com.example.ui.components.HeroShowcaseCard
 import com.example.ui.components.HeroSleepingBanner
+import com.example.ui.components.DualPoolEnergyStaminaHudCard
+import com.example.ui.components.MultiRoomStepDungeonCard
 import com.example.ui.components.SolCoinBadge
 import com.example.ui.components.SolstrideCard
+import com.example.ui.components.StepSlayerContractsCard
 import com.example.ui.components.TacticalStatBar
+import com.example.ui.components.WeeklyWorldBossCard
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.LocalSolstrideColors
 
@@ -107,6 +119,18 @@ fun BattleScreen(
     activeSleepMinutes: Long = 0L,
     onWakeHero: () -> Unit = {},
     worldFog: WorldFogState = WorldFogState(),
+    parryRingProgress: Float = 0f,
+    onTriggerParryDodge: () -> Unit = {},
+    onPetEvolutionBurst: () -> Unit = {},
+    weeklyWorldBoss: WeeklyWorldBoss? = null,
+    worldBossContributions: List<WorldBossContribution> = emptyList(),
+    onStrikeWorldBoss: () -> Unit = {},
+    onClaimWorldBossMilestone: (Int) -> Unit = {},
+    onSelectStepDungeon: (String) -> Unit = {},
+    onSprintDungeonCorridor: () -> Unit = {},
+    onResolveDungeonChamber: () -> Unit = {},
+    onClaimSlayerContract: (String) -> Unit = {},
+    hasWatchSleepDetection: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val ext = LocalSolstrideColors.current
@@ -388,6 +412,27 @@ fun BattleScreen(
                 }
             }
 
+            // Dual-Pool Real-Life Step Battle Energy & Sleep Stamina HUD + Pinnacle Chest Rule
+            item {
+                DualPoolEnergyStaminaHudCard(
+                    profile = profile,
+                    stats = stats,
+                    hardcoreState = hardcoreState,
+                    hasWatchSleepDetection = hasWatchSleepDetection
+                )
+            }
+
+            // Multi-Room Step Dungeons & Labyrinth Delves (Boss Chest at Final Vault)
+            item {
+                MultiRoomStepDungeonCard(
+                    profile = profile,
+                    hardcoreState = hardcoreState,
+                    onSelectDungeon = onSelectStepDungeon,
+                    onSprintCorridor = onSprintDungeonCorridor,
+                    onResolveChamber = onResolveDungeonChamber
+                )
+            }
+
             // Visible 2D Hero Preview ready for combat
             item {
                 HeroShowcaseCard(
@@ -399,6 +444,14 @@ fun BattleScreen(
                     isSleeping = isHeroSleeping,
                     sleepSourceLabel = sleepSourceLabel,
                     worldFog = worldFog
+                )
+            }
+
+            // Step-Fueled Slayer Contracts Board
+            item {
+                StepSlayerContractsCard(
+                    hardcoreState = hardcoreState,
+                    onClaimContract = onClaimSlayerContract
                 )
             }
 
@@ -526,19 +579,169 @@ fun BattleScreen(
                     }
                 }
             }
+
+            // Shared Live Weekly World Boss Raid Card (Real Firestore Community HP & Milestones)
+            item {
+                WeeklyWorldBossCard(
+                    profile = profile,
+                    worldBoss = weeklyWorldBoss,
+                    contributions = worldBossContributions,
+                    onStrikeWorldBoss = onStrikeWorldBoss,
+                    onClaimWorldBossMilestone = onClaimWorldBossMilestone
+                )
+            }
             return@LazyColumn
         }
 
-        // LIVE 2D ANIMATED HERO VS ENEMY BATTLE STAGE!
+        // LIVE 2D ANIMATED HERO VS ENEMY BATTLE STAGE + COMBO / MUTATOR BADGES!
         item {
-            AnimatedBattleStage(
-                profile = profile,
-                inventory = inventory,
-                equippedPet = equippedPet,
-                battle = battle,
-                enemy = enemy,
-                worldFog = worldFog
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (battle.comboCount > 0) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFFF59E0B).copy(alpha = 0.2f),
+                            border = BorderStroke(1.2.dp, Color(0xFFF59E0B))
+                        ) {
+                            Text(
+                                text = "🔥 ${battle.comboCount}x COMBO (+${battle.comboCount * 10}% DMG)",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = JetBrainsMonoFontFamily,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFFD97706),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                    battle.lastParryGrade?.let { grade ->
+                        val gColor = when (grade) {
+                            ParryGrade.PERFECT -> Color(0xFF10B981)
+                            ParryGrade.GLANCING -> Color(0xFFF59E0B)
+                            ParryGrade.MISSED -> Color(0xFFEF4444)
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = gColor.copy(alpha = 0.16f),
+                            border = BorderStroke(1.dp, gColor)
+                        ) {
+                            Text(
+                                text = grade.label.uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = gColor,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                    if (battle.weeklyMutatorLabel.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Text(
+                                text = "⚡ ${battle.weeklyMutatorLabel}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+                AnimatedBattleStage(
+                    profile = profile,
+                    inventory = inventory,
+                    equippedPet = equippedPet,
+                    battle = battle,
+                    enemy = enemy,
+                    worldFog = worldFog
+                )
+            }
+        }
+
+        // ACTIVE TIMING DODGE / PARRY RING OVERLAY WHEN ENEMY STRIKES!
+        if (battle.pendingEnemyTelegraph) {
+            item {
+                val relaxed = hardcoreState.relaxedTimingAssist
+                val inPerfect = if (relaxed) parryRingProgress in 0.50f..0.94f else parryRingProgress in 0.62f..0.89f
+                val ringAccent = if (inPerfect) Color(0xFF10B981) else Color(0xFFF59E0B)
+                SolstrideCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = Color(0xFF1A1025),
+                    strongBorder = true
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = if (inPerfect) "⚡ PARRY NOW! (PERFECT WINDOW)" else "⚔ INCOMING ENEMY STRIKE — TIME YOUR PARRY!",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (inPerfect) Color(0xFF34D399) else Color(0xFFFDE68A)
+                        )
+                        Box(
+                            modifier = Modifier.size(116.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val c = Offset(size.width / 2f, size.height / 2f)
+                                val maxR = size.minDimension * 0.48f
+                                val targetR = maxR * 0.38f
+                                val currentR = maxR * (1f - parryRingProgress * 0.72f)
+                                // Target emerald ring
+                                drawCircle(
+                                    color = Color(0xFF10B981).copy(alpha = 0.25f),
+                                    radius = targetR,
+                                    center = c
+                                )
+                                drawCircle(
+                                    color = Color(0xFF34D399),
+                                    radius = targetR,
+                                    center = c,
+                                    style = Stroke(width = 5.dp.toPx())
+                                )
+                                // Contracting golden timing ring
+                                drawCircle(
+                                    color = ringAccent,
+                                    radius = currentR.coerceAtLeast(8f),
+                                    center = c,
+                                    style = Stroke(width = 4.5.dp.toPx())
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Filled.Shield,
+                                contentDescription = "Parry target",
+                                tint = ringAccent,
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
+                        Button(
+                            onClick = onTriggerParryDodge,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (inPerfect) Color(0xFF059669) else Color(0xFFD97706)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(60.dp)
+                                .testTag("battle_parry_dodge_button")
+                        ) {
+                            Icon(Icons.Filled.Shield, contentDescription = "Dodge and Parry")
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = if (inPerfect) "PERFECT PARRY + COUNTER!" else "TAP TO DODGE / PARRY!",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         // Enemy HP Bar, Elemental Matchup, Active Status Effects & Intent Telegraph Card
@@ -768,7 +971,7 @@ fun BattleScreen(
                     }
                 }
 
-                // 3 Class Active Skills Row (Unlocked by Level, Upgraded by Sol Coins)
+                // 3 Class Active Skills Row (4-Tier Mastery Evolution • Unlocked by Level, Upgraded by Sol Coins)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -776,11 +979,14 @@ fun BattleScreen(
                     activeClassSkills.forEachIndexed { idx, skill ->
                         val unlocked = skill.isUnlockedAt(profile.level.toInt())
                         val rank = ClassSkillCatalog.effectiveRank(profile, skill)
+                        val masteryTier = skill.masteryTierForRank(rank)
+                        val effectiveValorCost = skill.effectiveValorCost(rank)
+                        val evolvedName = skill.evolvedNameForRank(rank)
                         val cooldown = battle.skillCooldowns.getOrElse(idx) { 0 }
                         val canCast = !expeditionLocked &&
                             unlocked &&
                             cooldown == 0 &&
-                            battle.valor >= skill.valorCost
+                            battle.valor >= effectiveValorCost
 
                         Button(
                             onClick = { onClassActiveSkill(idx) },
@@ -788,7 +994,7 @@ fun BattleScreen(
                             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(62.dp)
+                                .height(64.dp)
                                 .testTag("battle_class_skill_$idx"),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.secondary,
@@ -797,7 +1003,7 @@ fun BattleScreen(
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    text = skill.name,
+                                    text = evolvedName,
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.ExtraBold,
                                     maxLines = 1
@@ -806,7 +1012,7 @@ fun BattleScreen(
                                     text = when {
                                         !unlocked -> "Lv.${skill.unlockLevel} Lock"
                                         cooldown > 0 -> "CD ${cooldown}T"
-                                        else -> "R$rank • ${skill.valorCost}V"
+                                        else -> "${masteryTier.roman} R$rank • ${effectiveValorCost}V"
                                     },
                                     style = MaterialTheme.typography.labelSmall,
                                     fontFamily = JetBrainsMonoFontFamily,
@@ -862,7 +1068,7 @@ fun BattleScreen(
                 // Class Specialization Ultimate + Pet Synergy Combo Button
                 Button(
                     onClick = onUltimateCombo,
-                    enabled = !expeditionLocked && ultimateReady,
+                    enabled = !expeditionLocked && !battle.pendingEnemyTelegraph && ultimateReady,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp)
@@ -884,6 +1090,36 @@ fun BattleScreen(
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )
+                }
+
+                // Pet Evolution Signature Burst Skill Button
+                if (equippedPet != null) {
+                    val petForm = equippedPet.resolvedForm()
+                    val burstReady = battle.petBurstCharge >= 100
+                    Button(
+                        onClick = onPetEvolutionBurst,
+                        enabled = !expeditionLocked && !battle.pendingEnemyTelegraph && burstReady,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (burstReady) Color(petForm.auraHex) else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (burstReady) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("battle_pet_evolution_burst_button")
+                    ) {
+                        Icon(Icons.Filled.AutoAwesome, contentDescription = "Pet Evolution Burst")
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = if (burstReady) {
+                                "★ ${petForm.burstSkillName.uppercase()} (READY!)"
+                            } else {
+                                "${petForm.formName} Burst: ${battle.petBurstCharge}% (Parry & Strike to charge)"
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
                 }
 
                 Row(

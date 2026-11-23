@@ -233,9 +233,11 @@ class GalaxyWatchBridge(context: Context) {
                     val looksLikeWatch = device != null && hasPerm &&
                         WatchDeviceClassifier.isSmartWatchDevice(device, true)
                     val matchesCurrentId = address != null && address == _linkStatus.value.connectedNodeId
+                    val isNotExcluded = device == null || !hasPerm ||
+                        WatchDeviceClassifier.isSmartWatchDevice(device, true)
 
                     if (wasTrackedWatch || looksLikeWatch || matchesCurrentId || _linkStatus.value.connected) {
-                        if (wasTrackedWatch || looksLikeWatch || matchesCurrentId) {
+                        if (wasTrackedWatch || looksLikeWatch || matchesCurrentId || (!hasPerm && isNotExcluded)) {
                             if (address != null) {
                                 recentlyDisconnectedAddresses[address] = now
                             }
@@ -280,8 +282,10 @@ class GalaxyWatchBridge(context: Context) {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
             val watchAdded = addedDevices.orEmpty().any { info ->
                 (info.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    info.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
                     (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                        info.type == AudioDeviceInfo.TYPE_BLE_HEADSET)) &&
+                        (info.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                            info.type == AudioDeviceInfo.TYPE_BLE_SPEAKER))) &&
                     WatchDeviceClassifier.isSmartWatchName(info.productName?.toString())
             }
             if (watchAdded) {
@@ -294,11 +298,14 @@ class GalaxyWatchBridge(context: Context) {
         override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
             val watchRemoved = removedDevices.orEmpty().any { info ->
                 (info.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    info.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
                     (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                        info.type == AudioDeviceInfo.TYPE_BLE_HEADSET)) &&
+                        (info.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                            info.type == AudioDeviceInfo.TYPE_BLE_SPEAKER))) &&
                     WatchDeviceClassifier.isSmartWatchName(info.productName?.toString())
             }
             if (watchRemoved) {
+                activeAclWatches.clear()
                 WatchHeartbeatRegistry.clear()
                 lastExplicitDisconnectMs = System.currentTimeMillis()
                 Log.d(TAG, "AudioManager watch SCO/BLE device REMOVED")
@@ -529,9 +536,17 @@ class GalaxyWatchBridge(context: Context) {
             recentlyDisconnectedAddresses.entries.removeIf { (_, ts) ->
                 (now - ts) > PROFILE_TEARDOWN_GUARD_MS
             }
+            // If HFP Headset profile proxy is bound, prune any ACL-tracked watches not actively connected on HFP
+            val proxy = headsetProxy
+            if (proxy != null && WatchConnectionDetector.hasBluetoothConnectPermission(appContext)) {
+                val liveHfpAddresses = runCatching {
+                    proxy.connectedDevices.orEmpty().map { it.address }.toSet()
+                }.getOrDefault(emptySet())
+                activeAclWatches.keys.removeIf { addr -> addr !in liveHfpAddresses }
+            }
             val ignoredAddresses = recentlyDisconnectedAddresses.keys.toSet()
 
-            // 1. Primary real-world detection: live Bluetooth GATT/HFP/ACL + AudioManager + Wear OS Nearby Node
+            // 1. Primary real-world detection: live Bluetooth HFP Headset + AudioManager
             val detected = WatchConnectionDetector.detectConnectedWatch(
                 context = appContext,
                 headsetProxy = headsetProxy,
@@ -541,10 +556,12 @@ class GalaxyWatchBridge(context: Context) {
             )
 
             // 2. Optional companion app check via CapabilityClient + Heartbeat ACK
+            //    Only probe companion if Bluetooth/AudioManager confirms the watch is connected.
             var companionNodeId: String? = null
             var companionWatchName: String? = null
             var companionHeartbeatAlive = false
-            if (detected.bluetoothEnabled) {
+            val allowCompanionProbe = detected.bluetoothEnabled && detected.connected
+            if (allowCompanionProbe) {
                 val capabilityInfo = withTimeoutOrNull(CAPABILITY_QUERY_TIMEOUT_MS) {
                     runCatching {
                         capabilityClient.getCapability(

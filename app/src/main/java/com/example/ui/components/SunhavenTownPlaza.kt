@@ -21,17 +21,21 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,6 +48,7 @@ import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Gavel
@@ -54,6 +59,7 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.SportsMartialArts
@@ -64,6 +70,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -79,6 +86,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -93,6 +101,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.data.model.BrewGrade
 import com.example.data.model.HardcoreRpgState
 import com.example.data.model.HeroAvatarConfig
 import com.example.data.model.HeroClass
@@ -101,15 +110,19 @@ import com.example.data.model.ItemRarity
 import com.example.data.model.MercenaryContractSpec
 import com.example.data.model.OwnedPet
 import com.example.data.model.PetCatalog
+import com.example.data.model.PetEvolutionCatalystOffer
 import com.example.data.model.PetFoodSpec
 import com.example.data.model.PetGearSpec
 import com.example.data.model.PetType
+import com.example.data.model.TownBuildingCatalog
+import com.example.data.model.TownBuildingId
 import com.example.data.model.TownMaterialOffer
 import com.example.data.model.TownMerchantCatalog
 import com.example.data.model.TownNpcRole
 import com.example.data.model.TownPresencePlayer
 import com.example.data.model.WorldFogState
 import com.example.data.model.currentCalendarDateKey
+import com.example.domain.AlchemistRecipeSpec
 import com.example.domain.BlackMarketOfferSpec
 import com.example.domain.ClassSkillCatalog
 import com.example.domain.ClassSkillKind
@@ -141,6 +154,7 @@ fun SunhavenTownPlazaCard(
     onOpenNpc: (TownNpcRole) -> Unit,
     onInspectPlayer: (TownPresencePlayer) -> Unit,
     onOpenCharacterMirror: () -> Unit,
+    equippedPet: OwnedPet? = null,
     modifier: Modifier = Modifier
 ) {
     val ext = LocalSolstrideColors.current
@@ -177,7 +191,8 @@ fun SunhavenTownPlazaCard(
         TownNpcRole.PET_STORE,
         TownNpcRole.MATERIALS_MERCHANT,
         TownNpcRole.SKILL_MENTOR,
-        TownNpcRole.BLACKSMITH
+        TownNpcRole.BLACKSMITH,
+        TownNpcRole.ALCHEMIST_SPIRE
     )
 
     Surface(
@@ -233,7 +248,7 @@ fun SunhavenTownPlazaCard(
                         }
                     }
                     Text(
-                        text = "Tap to walk • Pet Store, Material Vendor, Skill Trainer & Blacksmith",
+                        text = "Tap to walk • Pet Store, Market, Training Hall, Forge & Alchemist Spire",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -380,6 +395,11 @@ fun SunhavenTownPlazaCard(
                                 HeroAvatarConfig(hairStyle = 0, hairColor = 2, skinTone = 2, eyeColor = 0, outfitPalette = 0, aura = 1),
                                 ItemRarity.SOLAR
                             )
+                            TownNpcRole.ALCHEMIST_SPIRE -> Triple(
+                                HeroClass.ARCANIST,
+                                HeroAvatarConfig(hairStyle = 1, hairColor = 4, skinTone = 0, eyeColor = 4, outfitPalette = 4, aura = 2),
+                                ItemRarity.EPIC
+                            )
                             TownNpcRole.QUESTMASTER -> Triple(
                                 HeroClass.VANGUARD,
                                 HeroAvatarConfig.defaultForClass(HeroClass.VANGUARD),
@@ -404,7 +424,8 @@ fun SunhavenTownPlazaCard(
                                 centerX = nx + 20.dp.toPx(),
                                 groundY = ny + npcBob * 0.6f,
                                 petType = PetType.SUNFOX_KIT,
-                                scale = 0.44f
+                                scale = 0.44f,
+                                evolutionStage = TownBuildingCatalog.levelOf(profile, TownBuildingId.MENAGERIE).coerceIn(1, 3)
                             )
                         }
                     }
@@ -432,7 +453,9 @@ fun SunhavenTownPlazaCard(
                                 centerX = px + petOffsetX,
                                 groundY = py + bob * 0.4f,
                                 petType = petType,
-                                scale = 0.44f
+                                scale = 0.44f,
+                                evolutionStage = player.equippedPetStage.toInt().coerceIn(1, 3),
+                                evolutionBranch = player.equippedPetBranch
                             )
                         }
                     }
@@ -464,7 +487,9 @@ fun SunhavenTownPlazaCard(
                             centerX = localPx + localPetOffsetX,
                             groundY = localPy + sin(phase * 1.6f) * 1.8.dp.toPx(),
                             petType = localPet,
-                            scale = 0.48f
+                            scale = 0.48f,
+                            evolutionStage = equippedPet?.resolvedStage() ?: 1,
+                            evolutionBranch = equippedPet?.resolvedBranch()?.name ?: "NONE"
                         )
                     }
 
@@ -476,9 +501,9 @@ fun SunhavenTownPlazaCard(
                     )
                 }
 
-                // Interactive Floating Nameplate Badges for Blacksmith, Skill Trainer, and Material Vendor
+                // Interactive Floating Nameplate Badges with Town Building Level for all 5 landmarks
                 plazaNpcs.forEach { npc ->
-                    val pillWidth = 104.dp
+                    val pillWidth = 112.dp
                     val xOffset = (canvasWidthDp * npc.posX - pillWidth / 2f).coerceIn(6.dp, canvasWidthDp - pillWidth - 6.dp)
                     val yOffset = (canvasHeightDp * npc.posY + 4.dp).coerceIn(6.dp, canvasHeightDp - 26.dp)
                     val npcColor = Color(npc.badgeColorHex)
@@ -487,8 +512,11 @@ fun SunhavenTownPlazaCard(
                         TownNpcRole.MATERIALS_MERCHANT -> Icons.Filled.ShoppingBag
                         TownNpcRole.SKILL_MENTOR -> Icons.Filled.School
                         TownNpcRole.BLACKSMITH -> Icons.Filled.Hardware
+                        TownNpcRole.ALCHEMIST_SPIRE -> Icons.Filled.Science
                         TownNpcRole.QUESTMASTER -> Icons.Filled.Assignment
                     }
+                    val bldgId = TownBuildingId.entries.firstOrNull { it.npcRole == npc }
+                    val lvlTag = bldgId?.let { " Lv.${TownBuildingCatalog.levelOf(profile, it)}" }.orEmpty()
                     Surface(
                         onClick = {
                             val approachX = (npc.posX + if (npc.posX > 0.5f) -0.10f else 0.10f).coerceIn(0.10f, 0.90f)
@@ -514,7 +542,7 @@ fun SunhavenTownPlazaCard(
                                 modifier = Modifier.size(11.dp)
                             )
                             Text(
-                                text = npc.title,
+                                text = "${npc.title}$lvlTag",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.ExtraBold,
@@ -568,27 +596,34 @@ fun SunhavenTownPlazaCard(
                         TownNpcRole.MATERIALS_MERCHANT -> Icons.Filled.ShoppingBag
                         TownNpcRole.SKILL_MENTOR -> Icons.Filled.School
                         TownNpcRole.BLACKSMITH -> Icons.Filled.Hardware
+                        TownNpcRole.ALCHEMIST_SPIRE -> Icons.Filled.Science
                     }
                     val shortLabel = when (role) {
                         TownNpcRole.QUESTMASTER -> "Quests"
                         TownNpcRole.PET_STORE -> "Pet Store"
-                        TownNpcRole.MATERIALS_MERCHANT -> "Material Vendor"
-                        TownNpcRole.SKILL_MENTOR -> "Skill Trainer"
-                        TownNpcRole.BLACKSMITH -> "Blacksmith"
+                        TownNpcRole.MATERIALS_MERCHANT -> "Market"
+                        TownNpcRole.SKILL_MENTOR -> "Training Hall"
+                        TownNpcRole.BLACKSMITH -> "Sun-Forge"
+                        TownNpcRole.ALCHEMIST_SPIRE -> "Alchemist Spire"
                     }
                     val extraBadge = if (role == TownNpcRole.QUESTMASTER && unclaimedQuestCount > 0) {
                         " ($unclaimedQuestCount)"
-                    } else ""
+                    } else {
+                        TownBuildingId.entries.firstOrNull { it.npcRole == role }?.let {
+                            " Lv.${TownBuildingCatalog.levelOf(profile, it)}"
+                        }.orEmpty()
+                    }
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = Color(role.badgeColorHex).copy(alpha = 0.14f),
                         border = BorderStroke(1.2.dp, Color(role.badgeColorHex).copy(alpha = 0.65f)),
                         modifier = Modifier
+                            .heightIn(min = 48.dp)
                             .clickable { onOpenNpc(role) }
                             .testTag("town_npc_chip_${role.id}")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
@@ -824,28 +859,36 @@ fun TownNpcModalSheet(
     onBuyPetGear: (PetGearSpec) -> Unit = {},
     onOpenPetsTab: () -> Unit = {},
     onBuyBlackMarketOffer: (BlackMarketOfferSpec) -> Unit = {},
-    onHireMercenaryContract: (MercenaryContractSpec) -> Unit = {}
+    onHireMercenaryContract: (MercenaryContractSpec) -> Unit = {},
+    onUpgradeBuilding: (TownBuildingId) -> Unit = {},
+    onBuyPetCatalyst: (PetEvolutionCatalystOffer) -> Unit = {},
+    onBrewAlchemistInteractive: (AlchemistRecipeSpec, BrewGrade) -> Unit = { _, _ -> }
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val ext = LocalSolstrideColors.current
     val todayKey = currentCalendarDateKey()
+    var activeBrewRecipe by remember { mutableStateOf<AlchemistRecipeSpec?>(null) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface
     ) {
+        var marketSection by remember(npcRole) { mutableStateOf(0) }
+        var petShopSection by remember(npcRole) { mutableStateOf(1) } // Default to Adopt so buying pets is immediately visible!
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .heightIn(max = 560.dp),
+                .fillMaxHeight(0.92f)
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // NPC Header + Sol Coin Purse
+            // Compact Sticky Header: NPC Name + Sol Coin Purse + Close Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
@@ -854,12 +897,16 @@ fun TownNpcModalSheet(
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = JetBrainsMonoFontFamily,
                         fontWeight = FontWeight.Bold,
-                        color = Color(npcRole.badgeColorHex)
+                        color = Color(npcRole.badgeColorHex),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = npcRole.npcName,
                         style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.ExtraBold
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 Surface(
@@ -879,28 +926,112 @@ fun TownNpcModalSheet(
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            text = "${profile.solCoins} Sol Coins",
+                            text = "${profile.solCoins}",
                             style = MaterialTheme.typography.labelMedium,
                             fontFamily = JetBrainsMonoFontFamily,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("town_npc_sheet_close_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Close shop"
+                    )
+                }
+            }
+
+            // Sticky Horizontally Scrollable Category Tabs (Roomy & Never Truncated on Mobile)
+            if (npcRole == TownNpcRole.PET_STORE) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val petTabs = listOf(
+                        Triple(1, "Adopt Pets", Icons.Filled.Pets),
+                        Triple(0, "Pet Treats", Icons.Filled.Restaurant),
+                        Triple(2, "Pet Gear", Icons.Filled.Shield),
+                        Triple(3, "Evolution Catalysts", Icons.Filled.AutoAwesome)
+                    )
+                    items(petTabs, key = { it.first }) { (idx, label, icon) ->
+                        FilterChip(
+                            selected = petShopSection == idx,
+                            onClick = { petShopSection = idx },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            },
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("pet_store_tab_$idx")
+                        )
+                    }
+                }
+            } else if (npcRole == TownNpcRole.MATERIALS_MERCHANT) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val marketTabs = listOf(
+                        0 to "Materials & Relics",
+                        1 to "Black Market",
+                        2 to "Mercenaries"
+                    )
+                    items(marketTabs, key = { it.first }) { (idx, label) ->
+                        FilterChip(
+                            selected = marketSection == idx,
+                            onClick = { marketSection = idx },
+                            label = {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            },
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("town_market_tab_$idx")
                         )
                     }
                 }
             }
 
-            Text(
-                text = npcRole.greeting,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            // Single Unified Full-Height Scrollable Shop Body — Everything Scrollable, Zero Clipping!
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentPadding = PaddingValues(top = 2.dp, bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                item(key = "npc_greeting") {
+                    Text(
+                        text = npcRole.greeting,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
 
-            when (npcRole) {
-                TownNpcRole.QUESTMASTER -> {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.weight(1f, fill = false)
-                    ) {
+                when (npcRole) {
+                    TownNpcRole.QUESTMASTER -> {
                         items(quests, key = { it.spec.id }) { status ->
                             Surface(
                                 shape = MaterialTheme.shapes.medium,
@@ -912,26 +1043,20 @@ fun TownNpcModalSheet(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "${status.spec.category.label.uppercase()} • ${status.spec.title}",
-                                                style = MaterialTheme.typography.titleSmall,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Text(
-                                                text = status.spec.description,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
+                                        Text(
+                                            text = "${status.spec.category.label.uppercase()} • ${status.spec.title}",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.weight(1f)
+                                        )
                                         if (status.isClaimed) {
                                             Icon(
                                                 imageVector = Icons.Filled.CheckCircle,
@@ -940,96 +1065,82 @@ fun TownNpcModalSheet(
                                             )
                                         }
                                     }
+                                    Text(
+                                        text = status.spec.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                     LinearProgressIndicator(
                                         progress = { status.progressFraction },
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(6.dp)
                                     )
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                    val chestTag = if (status.spec.chestRewardTier != null) " + Chest" else ""
+                                    val petTag = status.spec.companionReward?.let { " • ${it.displayName}" } ?: ""
+                                    Text(
+                                        text = "+${status.spec.solCoinReward} Sol Coins • +${status.spec.xpReward} XP • +${status.spec.sunshardReward} Shards$chestTag$petTag",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Button(
+                                        onClick = { onClaimQuest(status) },
+                                        enabled = status.canClaim,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .testTag("npc_claim_quest_${status.spec.id}")
                                     ) {
-                                        val chestTag = if (status.spec.chestRewardTier != null) " + Chest" else ""
-                                        val petTag = status.spec.companionReward?.let { " • 🐾 ${it.displayName} (${it.rarity.label})" } ?: ""
                                         Text(
-                                            text = "+${status.spec.solCoinReward} Sol Coins • +${status.spec.xpReward} XP • +${status.spec.sunshardReward} Shards$chestTag$petTag",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontFamily = JetBrainsMonoFontFamily,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.weight(1f)
+                                            text = when {
+                                                status.isClaimed -> "Completed"
+                                                status.canClaim -> "Claim Quest Rewards"
+                                                else -> "Progress: ${status.currentProgress} / ${status.spec.targetCount}"
+                                            },
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold
                                         )
-                                        Button(
-                                            onClick = { onClaimQuest(status) },
-                                            enabled = status.canClaim,
-                                            modifier = Modifier
-                                                .height(40.dp)
-                                                .testTag("npc_claim_quest_${status.spec.id}")
-                                        ) {
-                                            Text(
-                                                text = when {
-                                                    status.isClaimed -> "Done"
-                                                    status.canClaim -> "Claim"
-                                                    else -> "${status.currentProgress}/${status.spec.targetCount}"
-                                                },
-                                                style = MaterialTheme.typography.labelMedium
-                                            )
-                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                TownNpcRole.MATERIALS_MERCHANT -> {
-                    var marketSection by remember { mutableStateOf(0) } // 0 = Materials, 1 = Black Market, 2 = Mercenaries
-                    val expeditionLocked = profile.hasActiveExpedition()
-
-                    Text(
-                        text = "Stockpile: ${hardcoreState.sunsteelOre} Ore • ${hardcoreState.aetherHerbs} Herbs • ${hardcoreState.elementalEssence} Essence • ${hardcoreState.starforgedIngots} Ingots",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = JetBrainsMonoFontFamily,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            0 to "Materials",
-                            1 to "Black Market",
-                            2 to "Mercs"
-                        ).forEach { (idx, label) ->
-                            FilterChip(
-                                selected = marketSection == idx,
-                                onClick = { marketSection = idx },
-                                label = {
-                                    Text(
-                                        text = label,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("town_market_tab_$idx")
+                    TownNpcRole.MATERIALS_MERCHANT -> {
+                        val expeditionLocked = profile.hasActiveExpedition()
+                        item(key = "market_stockpile") {
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Stockpile: ${hardcoreState.sunsteelOre} Ore • ${hardcoreState.aetherHerbs} Herbs • ${hardcoreState.elementalEssence} Essence • ${hardcoreState.starforgedIngots} Ingots",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                )
+                            }
+                        }
+                        item(key = "market_building_upgrade") {
+                            TownBuildingUpgradeSection(
+                                buildingId = TownBuildingId.MARKET,
+                                profile = profile,
+                                oreCount = hardcoreState.sunsteelOre,
+                                onUpgradeBuilding = onUpgradeBuilding
                             )
                         }
-                    }
 
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.weight(1f, fill = false)
-                    ) {
                         when (marketSection) {
                             0 -> {
+                                val extraStock = TownBuildingCatalog.computeBonuses(profile).extraMerchantStock
                                 items(TownMerchantCatalog.offers, key = { it.id }) { offer ->
                                     val bought = hardcoreState.townPurchasesToday(offer.id, todayKey)
-                                    val remaining = (offer.dailyStockLimit - bought).coerceAtLeast(0)
+                                    val effectiveLimit = offer.dailyStockLimit + extraStock
+                                    val remaining = (effectiveLimit - bought).coerceAtLeast(0)
                                     val canAfford = !expeditionLocked && profile.solCoins >= offer.solCoinCost && remaining > 0
                                     Surface(
                                         shape = MaterialTheme.shapes.medium,
@@ -1037,61 +1148,58 @@ fun TownNpcModalSheet(
                                         border = BorderStroke(1.dp, ext.borderSubtle),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Row(
+                                        Column(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(12.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            verticalAlignment = Alignment.CenterVertically
+                                                .padding(14.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            Column(
-                                                modifier = Modifier.weight(1f),
-                                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                Text(
+                                                    text = offer.title,
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Spacer(Modifier.width(8.dp))
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = Color(npcRole.badgeColorHex).copy(alpha = 0.2f)
                                                 ) {
                                                     Text(
-                                                        text = offer.title,
-                                                        style = MaterialTheme.typography.titleSmall,
-                                                        fontWeight = FontWeight.Bold
+                                                        text = offer.tagLabel,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color(npcRole.badgeColorHex),
+                                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                                                     )
-                                                    Surface(
-                                                        shape = RoundedCornerShape(6.dp),
-                                                        color = Color(npcRole.badgeColorHex).copy(alpha = 0.2f)
-                                                    ) {
-                                                        Text(
-                                                            text = offer.tagLabel,
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            fontSize = 9.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = Color(npcRole.badgeColorHex),
-                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                                        )
-                                                    }
                                                 }
-                                                Text(
-                                                    text = offer.subtitle,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                                Text(
-                                                    text = "Daily Guild Stock: $remaining/${offer.dailyStockLimit}",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    fontFamily = JetBrainsMonoFontFamily,
-                                                    color = if (remaining > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error
-                                                )
                                             }
+                                            Text(
+                                                text = offer.subtitle,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = "Daily Stock: $remaining / $effectiveLimit",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontFamily = JetBrainsMonoFontFamily,
+                                                color = if (remaining > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                            )
                                             Button(
                                                 onClick = { onBuyMaterialOffer(offer) },
                                                 enabled = canAfford,
                                                 modifier = Modifier
+                                                    .fillMaxWidth()
                                                     .height(48.dp)
                                                     .testTag("buy_town_offer_${offer.id}")
                                             ) {
                                                 Text(
-                                                    text = if (remaining <= 0) "Sold Out" else "${offer.solCoinCost} Coins",
+                                                    text = if (remaining <= 0) "Sold Out Today" else "Buy for ${offer.solCoinCost} Sol Coins",
                                                     style = MaterialTheme.typography.labelMedium,
                                                     fontWeight = FontWeight.Bold
                                                 )
@@ -1109,37 +1217,32 @@ fun TownNpcModalSheet(
                                         border = BorderStroke(1.dp, ext.borderSubtle),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Row(
+                                        Column(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(12.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            verticalAlignment = Alignment.CenterVertically
+                                                .padding(14.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            Column(
-                                                modifier = Modifier.weight(1f),
-                                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                                            ) {
-                                                Text(
-                                                    text = offer.title,
-                                                    style = MaterialTheme.typography.titleSmall,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                                Text(
-                                                    text = offer.subtitle,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
+                                            Text(
+                                                text = offer.title,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                text = offer.subtitle,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                             Button(
                                                 onClick = { onBuyBlackMarketOffer(offer) },
                                                 enabled = canBuy,
                                                 modifier = Modifier
+                                                    .fillMaxWidth()
                                                     .height(48.dp)
                                                     .testTag("town_black_market_${offer.id}")
                                             ) {
                                                 Text(
-                                                    text = "${offer.solCoinCost} Coins",
+                                                    text = "Purchase for ${offer.solCoinCost} Sol Coins",
                                                     style = MaterialTheme.typography.labelMedium,
                                                     fontWeight = FontWeight.Bold
                                                 )
@@ -1149,14 +1252,15 @@ fun TownNpcModalSheet(
                                 }
                             }
                             else -> {
-                                item {
+                                item(key = "mercs_status") {
                                     Text(
                                         text = if (hardcoreState.mercenaryBattlesLeft > 0) {
                                             "Active Contract: ${MercenaryContractSpec.fromId(hardcoreState.mercenaryContractId)?.name ?: "Active"} (${hardcoreState.mercenaryBattlesLeft} battles left)"
                                         } else {
                                             "Hire an elite mercenary with Sol Coins for the next 5 battles"
                                         },
-                                        style = MaterialTheme.typography.labelSmall,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                 }
@@ -1169,37 +1273,32 @@ fun TownNpcModalSheet(
                                         border = BorderStroke(1.dp, if (isCurrent) MaterialTheme.colorScheme.primary else ext.borderSubtle),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Row(
+                                        Column(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(12.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            verticalAlignment = Alignment.CenterVertically
+                                                .padding(14.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            Column(
-                                                modifier = Modifier.weight(1f),
-                                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                                            ) {
-                                                Text(
-                                                    text = contract.name,
-                                                    style = MaterialTheme.typography.titleSmall,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                                Text(
-                                                    text = "${contract.summary} (${contract.durationBattles} Battles)",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
+                                            Text(
+                                                text = contract.name,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                text = "${contract.summary} (${contract.durationBattles} Battles)",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                             Button(
                                                 onClick = { onHireMercenaryContract(contract) },
                                                 enabled = canHire,
                                                 modifier = Modifier
+                                                    .fillMaxWidth()
                                                     .height(48.dp)
                                                     .testTag("town_hire_mercenary_${contract.id}")
                                             ) {
                                                 Text(
-                                                    text = if (isCurrent) "Renew (${contract.solCoinCost})" else "${contract.solCoinCost} Coins",
+                                                    text = if (isCurrent) "Renew Contract (${contract.solCoinCost} Coins)" else "Hire for ${contract.solCoinCost} Sol Coins",
                                                     style = MaterialTheme.typography.labelMedium,
                                                     fontWeight = FontWeight.Bold
                                                 )
@@ -1210,20 +1309,25 @@ fun TownNpcModalSheet(
                             }
                         }
                     }
-                }
 
-                TownNpcRole.SKILL_MENTOR -> {
-                    val classSkills = ClassSkillCatalog.skillsFor(profile.resolvedClass())
-                    Text(
-                        text = "${profile.resolvedClass().title} Arts • Hero Lv.${profile.level} (Skills unlock by Level, upgrade with Sol Coins)",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = JetBrainsMonoFontFamily,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.weight(1f, fill = false)
-                    ) {
+                    TownNpcRole.SKILL_MENTOR -> {
+                        val classSkills = ClassSkillCatalog.skillsFor(profile.resolvedClass())
+                        item(key = "mentor_subtitle") {
+                            Text(
+                                text = "${profile.resolvedClass().title} Arts • Hero Lv.${profile.level} (Unlock by Level, upgrade with Sol Coins)",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = JetBrainsMonoFontFamily,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        item(key = "mentor_building_upgrade") {
+                            TownBuildingUpgradeSection(
+                                buildingId = TownBuildingId.TRAINING_HALL,
+                                profile = profile,
+                                oreCount = hardcoreState.sunsteelOre,
+                                onUpgradeBuilding = onUpgradeBuilding
+                            )
+                        }
                         items(classSkills, key = { it.id }) { skill ->
                             val unlocked = skill.isUnlockedAt(profile.level.toInt())
                             val rank = ClassSkillCatalog.effectiveRank(profile, skill)
@@ -1239,145 +1343,258 @@ fun TownNpcModalSheet(
                                 ),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Row(
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(12.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                                    ) {
-                                        Text(
-                                            text = "${if (skill.kind == ClassSkillKind.ACTIVE) "⚡ ACTIVE" else "✦ PASSIVE"} • ${skill.name} (R$rank/${skill.maxRank})",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = skill.summary,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Text(
-                                            text = skill.perRankSummary,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
+                                    Text(
+                                        text = "${if (skill.kind == ClassSkillKind.ACTIVE) "⚡ ACTIVE" else "✦ PASSIVE"} • ${skill.name} (Rank $rank/${skill.maxRank})",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = skill.summary,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = skill.perRankSummary,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(Modifier.height(2.dp))
                                     Button(
                                         onClick = { onUpgradeClassSkill(skill.index) },
                                         enabled = canUpgrade,
                                         modifier = Modifier
-                                            .height(44.dp)
+                                            .fillMaxWidth()
+                                            .height(48.dp)
                                             .testTag("mentor_upgrade_skill_${skill.index}")
                                     ) {
                                         if (!unlocked) {
-                                            Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(14.dp))
-                                            Spacer(modifier = Modifier.width(3.dp))
-                                            Text("Lv.${skill.unlockLevel}", style = MaterialTheme.typography.labelSmall)
+                                            Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Unlocks at Hero Lv.${skill.unlockLevel}", fontWeight = FontWeight.Bold)
                                         } else if (maxed) {
-                                            Text("MAX", style = MaterialTheme.typography.labelSmall)
+                                            Text("MAX RANK ACHIEVED", fontWeight = FontWeight.Bold)
                                         } else {
-                                            Text("$cost Coins", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                            Text("Upgrade Rank ($cost Sol Coins)", fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                TownNpcRole.PET_STORE -> {
-                    var petShopSection by remember { mutableStateOf(0) } // 0 = Treats, 1 = Adopt, 2 = Pet Gear
-                    val ownedMap = remember(ownedPets) { ownedPets.associateBy { it.resolvedType() } }
-                    val expeditionLocked = profile.hasActiveExpedition()
+                    TownNpcRole.PET_STORE -> {
+                        val ownedMap = ownedPets.associateBy { it.resolvedType() }
+                        val expeditionLocked = profile.hasActiveExpedition()
 
-                    // Equipped Pet Status Strip
-                    Surface(
-                        shape = MaterialTheme.shapes.medium,
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        border = BorderStroke(1.dp, ext.borderSubtle),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = if (equippedPet != null) {
-                                        "Active Pet: ${equippedPet.resolvedType().displayName} • Lv.${equippedPet.level}"
-                                    } else {
-                                        "No Companion Equipped"
-                                    },
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
-                                Text(
-                                    text = if (equippedPet != null) {
-                                        "XP: ${equippedPet.xp}/${equippedPet.xpToNextLevel} • Feed Sol Coin treats or buy Pet Gear below"
-                                    } else {
-                                        "Adopt & equip a companion in the Adopt tab first!"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
-                            }
-                            Text(
-                                text = "${ownedPets.size}/6",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontFamily = JetBrainsMonoFontFamily,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-
-                    // 3-Tab Pet Store Selector (Treats | Adopt | Pet Gear)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            Triple(0, "Treats", Icons.Filled.Restaurant),
-                            Triple(1, "Adopt", Icons.Filled.Pets),
-                            Triple(2, "Pet Gear", Icons.Filled.Shield)
-                        ).forEach { (idx, label, icon) ->
-                            FilterChip(
-                                selected = petShopSection == idx,
-                                onClick = { petShopSection = idx },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = icon,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                },
-                                label = {
+                        item(key = "pet_store_equipped_strip") {
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                border = BorderStroke(1.dp, ext.borderSubtle),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = if (equippedPet != null) {
+                                                "Active Pet: ${equippedPet.resolvedForm().formName} • Lv.${equippedPet.level}"
+                                            } else {
+                                                "No Companion Equipped"
+                                            },
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                        Text(
+                                            text = if (equippedPet != null) {
+                                                "XP: ${equippedPet.xp}/${equippedPet.xpToNextLevel} • Stage ${equippedPet.resolvedStage()}/3"
+                                            } else {
+                                                "Adopt a companion below to unlock care & evolution!"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
                                     Text(
-                                        text = label,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold
+                                        text = "${ownedPets.size}/6",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = MaterialTheme.colorScheme.primary
                                     )
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("pet_store_tab_$idx")
+                                }
+                            }
+                        }
+
+                        item(key = "pet_store_building_upgrade") {
+                            TownBuildingUpgradeSection(
+                                buildingId = TownBuildingId.MENAGERIE,
+                                profile = profile,
+                                oreCount = hardcoreState.sunsteelOre,
+                                onUpgradeBuilding = onUpgradeBuilding
                             )
                         }
-                    }
 
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.weight(1f, fill = false)
-                    ) {
                         when (petShopSection) {
+                            1 -> {
+                                items(PetType.entries, key = { it.name }) { petType ->
+                                    val owned = ownedMap[petType]
+                                    val isEquipped = equippedPet?.resolvedType() == petType
+                                    val unlock = PetCatalog.evaluateUnlock(petType, profile)
+                                    val rarityColor = petRarityColorFor(petType.rarity)
+                                    Surface(
+                                        shape = MaterialTheme.shapes.medium,
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        border = BorderStroke(
+                                            1.2.dp,
+                                            if (isEquipped) MaterialTheme.colorScheme.primary else ext.borderSubtle
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(14.dp),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(56.dp)
+                                                        .clip(RoundedCornerShape(14.dp))
+                                                        .background(Color(0xFF131826)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                                        drawPetSprite(
+                                                            centerX = size.width * 0.5f,
+                                                            groundY = size.height * 0.82f,
+                                                            petType = petType,
+                                                            scale = 0.85f,
+                                                            evolutionStage = owned?.resolvedStage() ?: 1,
+                                                            evolutionBranch = owned?.resolvedBranch()?.name ?: "NONE"
+                                                        )
+                                                    }
+                                                }
+                                                Column(
+                                                    modifier = Modifier.weight(1f),
+                                                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                                                ) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = petType.displayName,
+                                                            style = MaterialTheme.typography.titleSmall,
+                                                            fontWeight = FontWeight.ExtraBold,
+                                                            modifier = Modifier.weight(1f, fill = false)
+                                                        )
+                                                        Surface(
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            color = rarityColor.copy(alpha = 0.18f)
+                                                        ) {
+                                                            Text(
+                                                                text = petType.rarity.label.uppercase(),
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                fontWeight = FontWeight.ExtraBold,
+                                                                color = rarityColor,
+                                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                    Text(
+                                                        text = if (owned != null) {
+                                                            "Owned Lv.${owned.level} • ${PetCatalog.computeBonus(owned).summaryText}"
+                                                        } else {
+                                                            "Lv.1 Bonus: ${PetCatalog.previewBonusAtLevel1(petType)}"
+                                                        },
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    if (owned == null && !unlock.unlocked) {
+                                                        Text(
+                                                            text = "Unlock: ${petType.unlockRequirementSummary} (${unlock.progressLabel})",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.error
+                                                        )
+                                                    } else {
+                                                        Text(
+                                                            text = petType.lore,
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            maxLines = 2,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            when {
+                                                owned != null -> Button(
+                                                    onClick = { onEquipPet(petType) },
+                                                    enabled = !expeditionLocked,
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = if (isEquipped) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+                                                    ),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(48.dp)
+                                                        .testTag("town_equip_pet_${petType.name.lowercase()}")
+                                                ) {
+                                                    Text(
+                                                        text = if (isEquipped) "Currently Equipped (Tap to Unequip)" else "Equip ${petType.displayName}",
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                                unlock.unlocked -> Button(
+                                                    onClick = { onAdoptPet(petType) },
+                                                    enabled = !expeditionLocked && profile.solCoins >= petType.coinCost,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(48.dp)
+                                                        .testTag("town_adopt_pet_${petType.name.lowercase()}")
+                                                ) {
+                                                    Text(
+                                                        text = if (profile.solCoins >= petType.coinCost) {
+                                                            "Adopt ${petType.displayName} (${petType.coinCost} Sol Coins)"
+                                                        } else {
+                                                            "Need ${petType.coinCost} Sol Coins to Adopt"
+                                                        },
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                                else -> OutlinedButton(
+                                                    onClick = {},
+                                                    enabled = false,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(48.dp)
+                                                ) {
+                                                    Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text("Locked (${unlock.progressLabel})")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             0 -> {
                                 items(PetCatalog.foodShop, key = { it.id }) { food ->
                                     val canFeed = !expeditionLocked &&
@@ -1390,44 +1607,50 @@ fun TownNpcModalSheet(
                                         border = BorderStroke(1.dp, ext.borderSubtle),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Row(
+                                        Column(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(12.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            verticalAlignment = Alignment.CenterVertically
+                                                .padding(14.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            Column(
-                                                modifier = Modifier.weight(1f),
-                                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Text(
                                                     text = food.name,
                                                     style = MaterialTheme.typography.titleSmall,
-                                                    fontWeight = FontWeight.Bold
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.weight(1f)
                                                 )
                                                 Text(
                                                     text = "+${food.xpGain} Pet XP",
-                                                    style = MaterialTheme.typography.labelSmall,
+                                                    style = MaterialTheme.typography.labelMedium,
                                                     fontFamily = JetBrainsMonoFontFamily,
-                                                    fontWeight = FontWeight.Bold,
+                                                    fontWeight = FontWeight.ExtraBold,
                                                     color = MaterialTheme.colorScheme.primary
                                                 )
-                                                Text(
-                                                    text = food.description,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
                                             }
+                                            Text(
+                                                text = food.description,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                             Button(
                                                 onClick = { onBuyPetFood(food) },
                                                 enabled = canFeed,
                                                 modifier = Modifier
+                                                    .fillMaxWidth()
                                                     .height(48.dp)
                                                     .testTag("town_buy_pet_food_${food.id}")
                                             ) {
                                                 Text(
-                                                    text = "${food.coinCost} Coins",
+                                                    text = if (equippedPet == null) {
+                                                        "Equip a Pet First (${food.coinCost} Coins)"
+                                                    } else {
+                                                        "Feed Now (${food.coinCost} Sol Coins)"
+                                                    },
                                                     style = MaterialTheme.typography.labelMedium,
                                                     fontWeight = FontWeight.Bold
                                                 )
@@ -1436,85 +1659,7 @@ fun TownNpcModalSheet(
                                     }
                                 }
                             }
-                            1 -> {
-                                items(PetType.entries, key = { it.name }) { petType ->
-                                    val owned = ownedMap[petType]
-                                    val isEquipped = equippedPet?.resolvedType() == petType
-                                    val unlock = PetCatalog.evaluateUnlock(petType, profile)
-                                    Surface(
-                                        shape = MaterialTheme.shapes.medium,
-                                        color = MaterialTheme.colorScheme.surfaceVariant,
-                                        border = BorderStroke(
-                                            1.dp,
-                                            if (isEquipped) MaterialTheme.colorScheme.primary else ext.borderSubtle
-                                        ),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(12.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Column(
-                                                modifier = Modifier.weight(1f),
-                                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                                            ) {
-                                                Text(
-                                                    text = "${petType.displayName} • ${petType.rarity.label}",
-                                                    style = MaterialTheme.typography.titleSmall,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                                Text(
-                                                    text = if (owned != null) {
-                                                        "Owned Lv.${owned.level} • ${PetCatalog.computeBonus(owned).summaryText}"
-                                                    } else if (unlock.unlocked) {
-                                                        "Unlocked • ${PetCatalog.previewBonusAtLevel1(petType)}"
-                                                    } else {
-                                                        "Locked: ${petType.unlockRequirementSummary} (${unlock.progressLabel})"
-                                                    },
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                            when {
-                                                owned != null -> Button(
-                                                    onClick = { onEquipPet(petType) },
-                                                    enabled = !expeditionLocked,
-                                                    colors = ButtonDefaults.buttonColors(
-                                                        containerColor = if (isEquipped) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
-                                                    ),
-                                                    modifier = Modifier
-                                                        .height(48.dp)
-                                                        .testTag("town_equip_pet_${petType.name.lowercase()}")
-                                                ) {
-                                                    Text(if (isEquipped) "Active" else "Equip", fontWeight = FontWeight.Bold)
-                                                }
-                                                unlock.unlocked -> Button(
-                                                    onClick = { onAdoptPet(petType) },
-                                                    enabled = !expeditionLocked && profile.solCoins >= petType.coinCost,
-                                                    modifier = Modifier
-                                                        .height(48.dp)
-                                                        .testTag("town_adopt_pet_${petType.name.lowercase()}")
-                                                ) {
-                                                    Text("${petType.coinCost} Coins", fontWeight = FontWeight.Bold)
-                                                }
-                                                else -> OutlinedButton(
-                                                    onClick = {},
-                                                    enabled = false,
-                                                    modifier = Modifier.height(48.dp)
-                                                ) {
-                                                    Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(14.dp))
-                                                    Spacer(modifier = Modifier.width(4.dp))
-                                                    Text("Locked")
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            else -> {
+                            2 -> {
                                 val allGear = PetCatalog.weaponShop + PetCatalog.armorShop
                                 items(allGear, key = { it.id }) { gear ->
                                     val alreadyEquipped = equippedPet?.equippedWeaponId == gear.id ||
@@ -1537,43 +1682,115 @@ fun TownNpcModalSheet(
                                         ),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Row(
+                                        Column(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(12.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            verticalAlignment = Alignment.CenterVertically
+                                                .padding(14.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            Column(
-                                                modifier = Modifier.weight(1f),
-                                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Text(
                                                     text = gear.name,
                                                     style = MaterialTheme.typography.titleSmall,
-                                                    fontWeight = FontWeight.Bold
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.weight(1f)
                                                 )
                                                 Text(
-                                                    text = "T${gear.tier} ${gear.slot.name} • $statLine",
+                                                    text = "T${gear.tier} ${gear.slot.name}",
                                                     style = MaterialTheme.typography.labelSmall,
                                                     fontFamily = JetBrainsMonoFontFamily,
+                                                    fontWeight = FontWeight.Bold,
                                                     color = MaterialTheme.colorScheme.primary
                                                 )
-                                                Text(
-                                                    text = gear.description,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
                                             }
+                                            Text(
+                                                text = "$statLine — ${gear.description}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                             Button(
                                                 onClick = { onBuyPetGear(gear) },
                                                 enabled = canBuy,
                                                 modifier = Modifier
+                                                    .fillMaxWidth()
                                                     .height(48.dp)
                                                     .testTag("town_buy_pet_gear_${gear.id}")
                                             ) {
                                                 Text(
-                                                    text = if (alreadyEquipped) "Equipped" else "${gear.coinCost} Coins",
+                                                    text = when {
+                                                        alreadyEquipped -> "Equipped on Active Pet"
+                                                        equippedPet == null -> "Equip a Pet First (${gear.coinCost} Coins)"
+                                                        else -> "Buy & Equip (${gear.coinCost} Sol Coins)"
+                                                    },
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            else -> {
+                                val menagerieLv = TownBuildingCatalog.levelOf(profile, TownBuildingId.MENAGERIE)
+                                item(key = "catalyst_pouch") {
+                                    Surface(
+                                        shape = MaterialTheme.shapes.medium,
+                                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = "Evolution Pouch: ${profile.evolutionShards} Shards • ${profile.mythicCores} Mythic Cores (Menagerie Lv.$menagerieLv)",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontFamily = JetBrainsMonoFontFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                        )
+                                    }
+                                }
+                                items(PetCatalog.catalystShop, key = { it.id }) { cat ->
+                                    val unlocked = menagerieLv >= cat.requiredMenagerieLevel
+                                    val canBuy = !expeditionLocked && unlocked && profile.solCoins >= cat.coinCost
+                                    Surface(
+                                        shape = MaterialTheme.shapes.medium,
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        border = BorderStroke(1.dp, ext.borderSubtle),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(14.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = cat.name,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                text = cat.description,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Button(
+                                                onClick = { onBuyPetCatalyst(cat) },
+                                                enabled = canBuy,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(48.dp)
+                                                    .testTag("town_buy_catalyst_${cat.id}")
+                                            ) {
+                                                Text(
+                                                    text = if (!unlocked) {
+                                                        "Requires Menagerie Lv.${cat.requiredMenagerieLevel}"
+                                                    } else {
+                                                        "Buy for ${cat.coinCost} Sol Coins"
+                                                    },
                                                     style = MaterialTheme.typography.labelMedium,
                                                     fontWeight = FontWeight.Bold
                                                 )
@@ -1583,65 +1800,169 @@ fun TownNpcModalSheet(
                                 }
                             }
                         }
-                    }
 
-                    OutlinedButton(
-                        onClick = {
-                            onDismiss()
-                            onOpenPetsTab()
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("npc_open_pets_sanctuary_button")
-                    ) {
-                        Icon(Icons.Filled.Pets, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Open Full Pets Sanctuary", fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                TownNpcRole.BLACKSMITH -> {
-                    Surface(
-                        shape = MaterialTheme.shapes.medium,
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        border = BorderStroke(1.dp, ext.borderSubtle),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "Forge Stockpile Ready",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "• Sunsteel Ore: ${hardcoreState.sunsteelOre}\n• Aether Herbs: ${hardcoreState.aetherHerbs}\n• Elemental Essence: ${hardcoreState.elementalEssence}\n• Starforged Masterwork Ingots: ${hardcoreState.starforgedIngots} (Guarantees +1 Rarity Tier & +18% Power)",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Button(
+                        item(key = "pet_store_open_sanctuary") {
+                            OutlinedButton(
                                 onClick = {
                                     onDismiss()
-                                    onOpenForgeTab()
+                                    onOpenPetsTab()
                                 },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(48.dp)
-                                    .testTag("npc_go_to_blacksmith_button")
+                                    .testTag("npc_open_pets_sanctuary_button")
                             ) {
-                                Icon(Icons.Filled.Hardware, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Open Blacksmith Anvil & Vault", fontWeight = FontWeight.Bold)
+                                Icon(Icons.Filled.Pets, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Open Pet Sanctuary & Evolution Tree", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    TownNpcRole.BLACKSMITH -> {
+                        item(key = "forge_building_upgrade") {
+                            TownBuildingUpgradeSection(
+                                buildingId = TownBuildingId.FORGE,
+                                profile = profile,
+                                oreCount = hardcoreState.sunsteelOre,
+                                onUpgradeBuilding = onUpgradeBuilding
+                            )
+                        }
+                        item(key = "forge_stockpile_card") {
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, ext.borderSubtle),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = "Forge Stockpile Ready",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "• Sunsteel Ore: ${hardcoreState.sunsteelOre}\n• Aether Herbs: ${hardcoreState.aetherHerbs}\n• Elemental Essence: ${hardcoreState.elementalEssence}\n• Starforged Masterwork Ingots: ${hardcoreState.starforgedIngots}",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    Button(
+                                        onClick = {
+                                            onDismiss()
+                                            onOpenForgeTab()
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .testTag("npc_go_to_blacksmith_button")
+                                    ) {
+                                        Icon(Icons.Filled.Hardware, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Open Interactive Anvil & Gear Vault", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    TownNpcRole.ALCHEMIST_SPIRE -> {
+                        item(key = "spire_building_upgrade") {
+                            TownBuildingUpgradeSection(
+                                buildingId = TownBuildingId.ALCHEMIST_SPIRE,
+                                profile = profile,
+                                oreCount = hardcoreState.sunsteelOre,
+                                onUpgradeBuilding = onUpgradeBuilding
+                            )
+                        }
+                        item(key = "spire_reagents") {
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Reagents: ${hardcoreState.aetherHerbs} Herbs • ${hardcoreState.elementalEssence} Essence • ${hardcoreState.sunsteelOre} Ore • ${profile.solCoins} Coins",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                )
+                            }
+                        }
+                        items(ProgressionEngine.alchemistRecipes, key = { it.id }) { recipe ->
+                            val canBrew = hardcoreState.aetherHerbs >= recipe.herbCost &&
+                                hardcoreState.elementalEssence >= recipe.essenceCost &&
+                                hardcoreState.sunsteelOre >= recipe.oreCost &&
+                                profile.solCoins >= recipe.solCoinCost
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, ext.borderSubtle),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = recipe.name,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = recipe.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    val costParts = buildList {
+                                        if (recipe.herbCost > 0) add("${recipe.herbCost} Herbs")
+                                        if (recipe.essenceCost > 0) add("${recipe.essenceCost} Essence")
+                                        if (recipe.oreCost > 0) add("${recipe.oreCost} Ore")
+                                        if (recipe.solCoinCost > 0) add("${recipe.solCoinCost} Coins")
+                                    }.joinToString(" • ")
+                                    Text(
+                                        text = "Cost: $costParts",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Button(
+                                        onClick = { activeBrewRecipe = recipe },
+                                        enabled = canBrew,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .testTag("town_spire_brew_${recipe.id}")
+                                    ) {
+                                        Text(
+                                            text = if (canBrew) "Brew in Cauldron" else "Need More Reagents",
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(10.dp))
         }
+    }
+
+    val brewTarget = activeBrewRecipe
+    if (brewTarget != null) {
+        AlchemistFlameBrewDialog(
+            recipeName = brewTarget.name,
+            relaxedTiming = hardcoreState.relaxedTimingAssist,
+            onComplete = { grade ->
+                activeBrewRecipe = null
+                onBrewAlchemistInteractive(brewTarget, grade)
+            },
+            onDismiss = { activeBrewRecipe = null }
+        )
     }
 }
 

@@ -69,10 +69,19 @@ import com.example.domain.ProgressionEngine
 import com.example.domain.WayfarerEventSpec
 import com.example.hardware.StepSensorStatus
 import com.example.hardware.StepTrackerTelemetry
+import androidx.compose.material3.Switch
+import com.example.data.model.LiveWorldEventSpec
+import com.example.data.model.WildsFieldNode
+import com.example.ui.components.LiveWorldEventBanner
+import com.example.ui.components.WalkableRealmWildsCanvas
+import com.example.ui.components.DualPoolEnergyStaminaHudCard
 import com.example.ui.components.HeroShowcaseCard
 import com.example.ui.components.HeroSleepingBanner
+import com.example.ui.components.MultiRoomStepDungeonCard
+import com.example.ui.components.SleepSanctuaryDreamCard
 import com.example.ui.components.SolCoinBadge
 import com.example.ui.components.SolstrideCard
+import com.example.ui.components.StepSlayerContractsCard
 import com.example.ui.components.StrideGaugeRing
 import com.example.ui.components.SunhavenTownPlazaCard
 import com.example.ui.components.TacticalStatBar
@@ -150,6 +159,16 @@ fun ExpeditionScreen(
     onOpenTownNpc: (TownNpcRole) -> Unit = {},
     onInspectTownPlayer: (TownPresencePlayer) -> Unit = {},
     onOpenCharacterMirror: () -> Unit = {},
+    activeWorldEvent: Pair<LiveWorldEventSpec, Int> = LiveWorldEventSpec.currentEventWithRemainingMinutes(),
+    wildsNodes: List<WildsFieldNode> = emptyList(),
+    onInteractWildsNode: (WildsFieldNode) -> Unit = {},
+    onToggleRelaxedTiming: (Boolean) -> Unit = {},
+    onAttuneSleepSanctuary: (Float) -> Unit = {},
+    onSelectStepDungeon: (String) -> Unit = {},
+    onSprintDungeonCorridor: () -> Unit = {},
+    onResolveDungeonChamber: () -> Unit = {},
+    onClaimSlayerContract: (String) -> Unit = {},
+    hasWatchSleepDetection: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val encounterReady = profile.encounterProgress >= 100L
@@ -233,7 +252,15 @@ fun ExpeditionScreen(
                     }
                 }
 
-                // Walkable Real-Time Multiplayer Sunhaven Plaza + 4 Town NPCs (Pet Store, Material Vendor, Skill Trainer, Blacksmith)
+                // Live Rotating 4-Hour World Event Banner
+                item {
+                    LiveWorldEventBanner(
+                        event = activeWorldEvent.first,
+                        remainingMinutes = activeWorldEvent.second
+                    )
+                }
+
+                // Walkable Real-Time Multiplayer Sunhaven Plaza + 5 Upgradeable Town Landmarks
                 item {
                     SunhavenTownPlazaCard(
                         profile = profile,
@@ -247,7 +274,8 @@ fun ExpeditionScreen(
                         onSendEmote = onSendTownEmote,
                         onOpenNpc = onOpenTownNpc,
                         onInspectPlayer = onInspectTownPlayer,
-                        onOpenCharacterMirror = onOpenCharacterMirror
+                        onOpenCharacterMirror = onOpenCharacterMirror,
+                        equippedPet = equippedPet
                     )
                 }
 
@@ -339,6 +367,63 @@ fun ExpeditionScreen(
             }
 
             TownHubSubTab.JOURNEY -> {
+                item {
+                    LiveWorldEventBanner(
+                        event = activeWorldEvent.first,
+                        remainingMinutes = activeWorldEvent.second
+                    )
+                }
+
+                // Interactive Walkable 2D Realm Wilds Zone with Chests, Ore, Herbs, Evo Crystals & Encounters!
+                item {
+                    WalkableRealmWildsCanvas(
+                        profile = profile,
+                        equippedPet = equippedPet,
+                        nodes = wildsNodes,
+                        fogDensity = worldFog.visualFogDensity,
+                        onInteractNode = onInteractWildsNode
+                    )
+                }
+
+                // Dual-Pool Real-World Step Energy & Sleep Stamina HUD
+                item {
+                    DualPoolEnergyStaminaHudCard(
+                        profile = profile,
+                        stats = stats,
+                        hardcoreState = hardcoreState,
+                        hasWatchSleepDetection = hasWatchSleepDetection
+                    )
+                }
+
+                // Multi-Room Step Dungeons & Labyrinth Delves (End-of-Dungeon Boss Chest)
+                item {
+                    MultiRoomStepDungeonCard(
+                        profile = profile,
+                        hardcoreState = hardcoreState,
+                        onSelectDungeon = onSelectStepDungeon,
+                        onSprintCorridor = onSprintDungeonCorridor,
+                        onResolveChamber = onResolveDungeonChamber
+                    )
+                }
+
+                // Sleep Sanctuary & Dream Rest Tiers
+                item {
+                    SleepSanctuaryDreamCard(
+                        profile = profile,
+                        hardcoreState = hardcoreState,
+                        onAttuneSleep = onAttuneSleepSanctuary,
+                        hasWatchSleepDetection = hasWatchSleepDetection
+                    )
+                }
+
+                // Step-Fueled Slayer Contracts
+                item {
+                    StepSlayerContractsCard(
+                        hardcoreState = hardcoreState,
+                        onClaimContract = onClaimSlayerContract
+                    )
+                }
+
                 // Visible 2D Hero Character Showcase with Custom Avatar, 6-Slot Equipped Gear, World Fog & Pet
                 item {
                     HeroShowcaseCard(
@@ -476,7 +561,7 @@ fun ExpeditionScreen(
                             text = when {
                                 expeditionLocked -> "Locked on Expedition"
                                 battleActive -> "Resume Tactical Battle"
-                                else -> "Engage Encounter (0 Energy)"
+                                else -> "Engage Encounter (Step Energy / Stamina)"
                             },
                             style = MaterialTheme.typography.titleMedium
                         )
@@ -615,6 +700,35 @@ fun ExpeditionScreen(
             }
 
             TownHubSubTab.TRACKERS -> {
+                // Interactive Gameplay Accessibility Toggle: Relaxed Timing Assist
+                item {
+                    SolstrideCard(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Relaxed Timing Assist",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Widens Dodge/Parry, Anvil Forge & Cauldron Brew sweet spots for comfortable one-handed play.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = hardcoreState.relaxedTimingAssist,
+                                onCheckedChange = onToggleRelaxedTiming,
+                                modifier = Modifier.testTag("relaxed_timing_switch")
+                            )
+                        }
+                    }
+                }
+
                 // Built-In On-Device Hardware Pedometer Card (Active ONLY when no watch is connected)
                 item {
                     OnDevicePedometerCard(
@@ -797,6 +911,16 @@ fun ExpeditionScreen(
                 }
             }
         }
+
+                // Sleep Sanctuary & Dream Rest Tiers inside Trackers tab
+                item {
+                    SleepSanctuaryDreamCard(
+                        profile = profile,
+                        hardcoreState = hardcoreState,
+                        onAttuneSleep = onAttuneSleepSanctuary,
+                        hasWatchSleepDetection = hasWatchSleepDetection
+                    )
+                }
 
                 // Step-Harvested Crafting Material Satchel & Survival Status Bar
                 item {

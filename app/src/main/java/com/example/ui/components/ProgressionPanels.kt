@@ -45,12 +45,14 @@ import com.example.domain.ClassSkillKind
 import com.example.domain.ProgressionEngine
 import com.example.domain.QuestCategory
 import com.example.domain.QuestStatus
+import com.example.domain.SkillMasteryTier
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.LocalSolstrideColors
 
 @Composable
 fun SkillTreePanel(
     profile: HeroProfile,
+    onUpgradeSkillNode: (Int) -> Unit = {},
     onVisitTownSkillTrainer: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -79,12 +81,12 @@ fun SkillTreePanel(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "${heroClass.displayTitle} Skill Mastery",
+                            text = "${heroClass.displayTitle} 4-Tier Skill Mastery",
                             style = MaterialTheme.typography.headlineSmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                         Text(
-                            text = "Skills unlock automatically as your Hero levels up (Lv. 1–20). Visit Master Kaelen in Sunhaven Town to buy skill rank upgrades!",
+                            text = "Evolve every skill across 4 Mastery Tiers (Ranks 1–10): Tier I Initiate (R1–3) → Tier II Adept (R4–6) → Tier III Grandmaster (R7–9) → Tier IV Mythic ★ (R10)!",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
@@ -92,7 +94,38 @@ fun SkillTreePanel(
                     Spacer(modifier = Modifier.width(10.dp))
                     SolCoinBadge(solCoins = profile.solCoins)
                 }
-                Button(
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    SkillMasteryTier.entries.forEach { tier ->
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                            border = BorderStroke(1.dp, ext.borderSubtle)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = tier.roman,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "R${tier.minRank}–${tier.maxRank}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+                OutlinedButton(
                     onClick = onVisitTownSkillTrainer,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -101,7 +134,7 @@ fun SkillTreePanel(
                 ) {
                     Icon(Icons.Filled.WorkspacePremium, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Train & Buy Skill Upgrades in Town")
+                    Text("Visit Master Kaelen in Sunhaven Town")
                 }
             }
         }
@@ -117,90 +150,135 @@ fun SkillTreePanel(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Column {
-                    Text(text = "Active Combat Arts (3)", style = MaterialTheme.typography.titleMedium)
+                    Text(text = "Active Combat Arts (3 • 4 Mastery Tiers)", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        text = "Cast directly in tactical battles • Unlocked at Lv. 1, Lv. 5 & Lv. 12",
+                        text = "Cast directly in tactical battles • Evolves at Rank 4 (Adept), Rank 7 (Grandmaster) & Rank 10 (Mythic ★)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
             Spacer(modifier = Modifier.height(10.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 activeSkills.forEach { skill ->
                     val unlocked = skill.isUnlockedAt(profile.level.toInt())
                     val rank = ClassSkillCatalog.effectiveRank(profile, skill)
                     val isMaxed = rank >= skill.maxRank
+                    val currentMasteryTier = skill.masteryTierForRank(rank)
+                    val nextRank = (rank + 1).coerceAtMost(skill.maxRank)
+                    val nextMasteryTier = SkillMasteryTier.forRank(nextRank)
+                    val reqHeroLevelForNext = (skill.unlockLevel + nextMasteryTier.requiredHeroLevelBonus).coerceAtLeast(skill.unlockLevel)
+                    val meetsNextLevel = profile.level >= reqHeroLevelForNext || profile.prestigeLevel > 0L
+                    val upgradeCost = ClassSkillCatalog.upgradeSolCoinCost(rank)
+                    val evolvedName = skill.evolvedNameForRank(rank)
+                    val effValor = skill.effectiveValorCost(rank)
+                    val effCd = skill.effectiveCooldownTurns(rank)
 
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = MaterialTheme.shapes.medium,
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         border = BorderStroke(
-                            width = if (unlocked && rank > 0) 1.5.dp else 1.dp,
-                            color = if (unlocked && rank > 0) MaterialTheme.colorScheme.primary else ext.borderSubtle
+                            width = if (unlocked && rank >= 4) 2.dp else 1.2.dp,
+                            color = when {
+                                rank >= 10 -> MaterialTheme.colorScheme.tertiary
+                                unlocked && rank > 0 -> MaterialTheme.colorScheme.primary
+                                else -> ext.borderSubtle
+                            }
                         )
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
                                 ) {
-                                    Text(text = skill.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                                     Text(
-                                        text = "R$rank/${skill.maxRank}",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontFamily = JetBrainsMonoFontFamily,
+                                        text = "${skill.skillBranchTierLabel} • ${currentMasteryTier.roman} ${currentMasteryTier.title}",
+                                        style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                                     )
                                 }
                                 Text(
-                                    text = "${skill.valorCost} Valor${if (skill.cooldownTurns > 0) " • ${skill.cooldownTurns}T CD" else " • 0T CD"} • Lv.${skill.unlockLevel}",
-                                    style = MaterialTheme.typography.labelSmall,
+                                    text = "R$rank/${skill.maxRank}",
+                                    style = MaterialTheme.typography.labelMedium,
                                     fontFamily = JetBrainsMonoFontFamily,
-                                    color = MaterialTheme.colorScheme.tertiary
-                                )
-                                Text(
-                                    text = skill.summary,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = skill.perRankSummary,
-                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.ExtraBold,
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = when {
-                                    !unlocked -> MaterialTheme.colorScheme.surface
-                                    isMaxed -> MaterialTheme.colorScheme.tertiaryContainer
-                                    else -> MaterialTheme.colorScheme.primaryContainer
-                                },
-                                border = BorderStroke(1.dp, ext.borderSubtle)
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = when {
-                                        !unlocked -> "Lv.${skill.unlockLevel}"
-                                        isMaxed -> "MAX"
-                                        else -> "R$rank/${skill.maxRank}"
-                                    },
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontFamily = JetBrainsMonoFontFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = evolvedName,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Text(
+                                        text = "$effValor Valor${if (effCd > 0) " • ${effCd}T CD" else " • 0T CD"} • Unlocks Lv.${skill.unlockLevel}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        color = MaterialTheme.colorScheme.tertiary
+                                    )
+                                    Text(
+                                        text = skill.summary,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = "${skill.perRankSummary} • ${currentMasteryTier.milestoneBonusSummary}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = { onUpgradeSkillNode(skill.index) },
+                                    enabled = unlocked && !isMaxed && meetsNextLevel && profile.solCoins >= upgradeCost,
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .testTag("skill_tree_upgrade_${skill.index}")
+                                ) {
+                                    Text(
+                                        text = when {
+                                            !unlocked -> "Lv.${skill.unlockLevel}"
+                                            isMaxed -> "MYTHIC ★"
+                                            !meetsNextLevel -> "Need Lv.$reqHeroLevelForNext"
+                                            else -> "R$nextRank (${upgradeCost}c)"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
                             }
+
+                            LinearProgressIndicator(
+                                progress = { (rank.toFloat() / skill.maxRank.toFloat()).coerceIn(0f, 1f) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(5.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.surface
+                            )
                         }
                     }
                 }
@@ -218,79 +296,120 @@ fun SkillTreePanel(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Column {
-                    Text(text = "Class Passive Mastery (6)", style = MaterialTheme.typography.titleMedium)
+                    Text(text = "Class Passive Mastery (6 • 4 Mastery Tiers)", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        text = "Permanent stat, combat & expedition upgrades unlocked at Lv. 2–20",
+                        text = "Permanent stat, combat & expedition upgrades across Ranks 1–10",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
             Spacer(modifier = Modifier.height(10.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 passiveSkills.forEach { skill ->
                     val unlocked = skill.isUnlockedAt(profile.level.toInt())
                     val rank = ClassSkillCatalog.effectiveRank(profile, skill)
                     val isMaxed = rank >= skill.maxRank
+                    val currentMasteryTier = skill.masteryTierForRank(rank)
+                    val nextRank = (rank + 1).coerceAtMost(skill.maxRank)
+                    val nextMasteryTier = SkillMasteryTier.forRank(nextRank)
+                    val reqHeroLevelForNext = (skill.unlockLevel + nextMasteryTier.requiredHeroLevelBonus).coerceAtLeast(skill.unlockLevel)
+                    val meetsNextLevel = profile.level >= reqHeroLevelForNext || profile.prestigeLevel > 0L
+                    val upgradeCost = ClassSkillCatalog.upgradeSolCoinCost(rank)
+                    val evolvedName = skill.evolvedNameForRank(rank)
 
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = MaterialTheme.shapes.medium,
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         border = BorderStroke(
-                            width = if (rank > 0) 1.5.dp else 1.dp,
-                            color = if (rank > 0) MaterialTheme.colorScheme.primary else ext.borderSubtle
+                            width = if (rank >= 4) 2.dp else 1.2.dp,
+                            color = when {
+                                rank >= 10 -> MaterialTheme.colorScheme.tertiary
+                                rank > 0 -> MaterialTheme.colorScheme.primary
+                                else -> ext.borderSubtle
+                            }
                         )
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
                                 ) {
-                                    Text(text = skill.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                                     Text(
-                                        text = "R$rank/${skill.maxRank}",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontFamily = JetBrainsMonoFontFamily,
+                                        text = "${skill.skillBranchTierLabel} • ${currentMasteryTier.roman} ${currentMasteryTier.title}",
+                                        style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                                     )
                                 }
                                 Text(
-                                    text = skill.perRankSummary,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = when {
-                                    !unlocked -> MaterialTheme.colorScheme.surface
-                                    isMaxed -> MaterialTheme.colorScheme.tertiaryContainer
-                                    else -> MaterialTheme.colorScheme.primaryContainer
-                                },
-                                border = BorderStroke(1.dp, ext.borderSubtle)
-                            ) {
-                                Text(
-                                    text = when {
-                                        !unlocked -> "Lv.${skill.unlockLevel}"
-                                        isMaxed -> "MAX"
-                                        else -> "R$rank/${skill.maxRank}"
-                                    },
+                                    text = "R$rank/${skill.maxRank}",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontFamily = JetBrainsMonoFontFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = evolvedName,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Text(
+                                        text = skill.perRankSummary,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = { onUpgradeSkillNode(skill.index) },
+                                    enabled = unlocked && !isMaxed && meetsNextLevel && profile.solCoins >= upgradeCost,
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .testTag("skill_tree_upgrade_${skill.index}")
+                                ) {
+                                    Text(
+                                        text = when {
+                                            !unlocked -> "Lv.${skill.unlockLevel}"
+                                            isMaxed -> "MYTHIC ★"
+                                            !meetsNextLevel -> "Need Lv.$reqHeroLevelForNext"
+                                            else -> "R$nextRank (${upgradeCost}c)"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            }
+                            LinearProgressIndicator(
+                                progress = { (rank.toFloat() / skill.maxRank.toFloat()).coerceIn(0f, 1f) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(5.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.surface
+                            )
                         }
                     }
                 }

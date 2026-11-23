@@ -87,8 +87,10 @@ import com.example.data.model.UiState
 import com.example.data.model.computeDerivedStats
 import com.example.hardware.VoiceCommandParser
 import com.example.ui.components.CharacterCreatorStudio
+import com.example.ui.components.FreshJourneyMigrationDialog
 import com.example.ui.components.InspectTownPlayerDialog
 import com.example.ui.components.InteractiveLootChestDialog
+import com.example.ui.components.PetEvolutionCeremonyDialog
 import com.example.ui.components.SolstrideCard
 import com.example.ui.components.TownNpcModalSheet
 import com.example.ui.components.WatchSyncBottomSheet
@@ -143,6 +145,7 @@ fun SolstrideAppShell(
     val watchStatus by viewModel.watchLinkStatus.collectAsStateWithLifecycle()
     val healthConnectStatus by viewModel.healthConnectStatus.collectAsStateWithLifecycle()
     val isWatchConnected by viewModel.isWatchConnected.collectAsStateWithLifecycle()
+    val hasWatchSleepDetection by viewModel.hasWatchSleepDetection.collectAsStateWithLifecycle()
     val pendingBatches by viewModel.pendingBatches.collectAsStateWithLifecycle()
     val syncHistory by viewModel.syncHistory.collectAsStateWithLifecycle()
     val isOnline by viewModel.isOnline.collectAsStateWithLifecycle()
@@ -173,6 +176,17 @@ fun SolstrideAppShell(
     val multiplayerChatMessages by viewModel.multiplayerChatMessages.collectAsStateWithLifecycle()
     val multiplayerDuels by viewModel.multiplayerDuels.collectAsStateWithLifecycle()
     val multiplayerPetPlaydates by viewModel.multiplayerPetPlaydates.collectAsStateWithLifecycle()
+    val freshJourneyBanner by viewModel.freshJourneyBanner.collectAsStateWithLifecycle()
+    val parryRingProgress by viewModel.parryRingProgress.collectAsStateWithLifecycle()
+    val recentEvolutionCeremonyPet by viewModel.recentEvolutionCeremonyPet.collectAsStateWithLifecycle()
+    val activeWorldEvent by viewModel.activeWorldEvent.collectAsStateWithLifecycle()
+    val wildsNodes by viewModel.wildsNodes.collectAsStateWithLifecycle()
+    val weeklyWorldBoss by viewModel.weeklyWorldBoss.collectAsStateWithLifecycle()
+    val worldBossContributions by viewModel.worldBossContributions.collectAsStateWithLifecycle()
+    val coopRaids by viewModel.coopRaids.collectAsStateWithLifecycle()
+    val guilds by viewModel.guilds.collectAsStateWithLifecycle()
+    val myGuild by viewModel.myGuild.collectAsStateWithLifecycle()
+    val guildChatMessages by viewModel.guildChatMessages.collectAsStateWithLifecycle()
 
     LaunchedEffect(pendingWidgetTab) {
         if (!pendingWidgetTab.isNullOrBlank()) {
@@ -715,6 +729,16 @@ fun SolstrideAppShell(
                                     onOpenTownNpc = { npc -> viewModel.openTownNpc(npc) },
                                     onInspectTownPlayer = { p -> viewModel.inspectTownPlayer(p) },
                                     onOpenCharacterMirror = { viewModel.openCharacterMirror() },
+                                    activeWorldEvent = activeWorldEvent,
+                                    wildsNodes = wildsNodes,
+                                    onInteractWildsNode = { node -> viewModel.interactWildsNode(node) },
+                                    onToggleRelaxedTiming = { enabled -> viewModel.setRelaxedTimingAssist(enabled) },
+                                    onAttuneSleepSanctuary = { hours -> viewModel.attuneSleepSanctuaryRest(hours) },
+                                    onSelectStepDungeon = { id -> viewModel.selectStepDungeon(id) },
+                                    onSprintDungeonCorridor = { viewModel.sprintDungeonCorridorWithEnergy() },
+                                    onResolveDungeonChamber = { viewModel.advanceOrResolveDungeonChamber() },
+                                    onClaimSlayerContract = { id -> viewModel.claimSlayerContract(id) },
+                                    hasWatchSleepDetection = hasWatchSleepDetection,
                                     modifier = contentModifier
                                 )
                                 SolstrideTab.BATTLE -> BattleScreen(
@@ -746,6 +770,18 @@ fun SolstrideAppShell(
                                     activeSleepMinutes = watchSleepState.activeSleepMinutes,
                                     onWakeHero = { viewModel.wakeHeroFromSleep() },
                                     worldFog = worldFogState,
+                                    parryRingProgress = parryRingProgress,
+                                    onTriggerParryDodge = { viewModel.triggerParryDodge() },
+                                    onPetEvolutionBurst = { viewModel.performPetEvolutionBurst() },
+                                    weeklyWorldBoss = weeklyWorldBoss,
+                                    worldBossContributions = worldBossContributions,
+                                    onStrikeWorldBoss = { viewModel.strikeWeeklyWorldBoss() },
+                                    onClaimWorldBossMilestone = { tier -> viewModel.claimWorldBossMilestone(tier) },
+                                    onSelectStepDungeon = { id -> viewModel.selectStepDungeon(id) },
+                                    onSprintDungeonCorridor = { viewModel.sprintDungeonCorridorWithEnergy() },
+                                    onResolveDungeonChamber = { viewModel.advanceOrResolveDungeonChamber() },
+                                    onClaimSlayerContract = { id -> viewModel.claimSlayerContract(id) },
+                                    hasWatchSleepDetection = hasWatchSleepDetection,
                                     modifier = contentModifier
                                 )
                                 SolstrideTab.PETS -> PetsScreen(
@@ -757,6 +793,8 @@ fun SolstrideAppShell(
                                     onJumpToExpedition = { viewModel.selectTab(SolstrideTab.EXPEDITION) },
                                     onEquipPet = { viewModel.equipPet(it) },
                                     onVisitTownPetStore = { viewModel.visitTownNpc(TownNpcRole.PET_STORE) },
+                                    onPetCareAction = { pet, action -> viewModel.performPetCareAction(pet, action) },
+                                    onEvolvePet = { pet, branch -> viewModel.evolvePet(pet, branch) },
                                     widgetSnapshot = widgetSnapshot,
                                     onPinPetWidget = {
                                         val result = SolstrideWidgetUpdater.requestPinWidget(
@@ -807,6 +845,13 @@ fun SolstrideAppShell(
                                     onVisitTownSkillTrainer = { viewModel.visitTownNpc(TownNpcRole.SKILL_MENTOR) },
                                     onResetAllProgress = { viewModel.resetAllProgress() },
                                     onOpenCharacterMirror = { viewModel.openCharacterMirror() },
+                                    onCompleteAnvilForge = { item, grade -> viewModel.completeAnvilForgeUpgrade(item, grade) },
+                                    onCompleteAlchemistBrew = { recipe, grade -> viewModel.completeAlchemistBrew(recipe, grade) },
+                                    onClaimSeasonTier = { tier -> viewModel.claimSeasonTier(tier) },
+                                    onAllocateExtendedAttribute = { isAgility -> viewModel.allocateExtendedAttribute(isAgility) },
+                                    onUpgradeConstellationNode = { nodeId -> viewModel.upgradeConstellationNode(nodeId) },
+                                    onReforgeItemAffixes = { item -> viewModel.reforgeItemAffixes(item) },
+                                    onClaimSlayerContract = { id -> viewModel.claimSlayerContract(id) },
                                     worldFog = worldFogState,
                                     isHeroSleeping = isHeroSleeping,
                                     sleepSourceLabel = watchSleepState.sleepSourceLabel,
@@ -837,6 +882,20 @@ fun SolstrideAppShell(
                                     onFinishPetPlaydate = { viewModel.finishPetPlaydate(it) },
                                     onDismissPetPlaydate = { viewModel.dismissPetPlaydate(it) },
                                     leaderboardState = leaderboardState,
+                                    coopRaids = coopRaids,
+                                    guilds = guilds,
+                                    myGuild = myGuild,
+                                    guildChatMessages = guildChatMessages,
+                                    onCreateRaid = { viewModel.createCoopRaid() },
+                                    onJoinRaid = { raidId -> viewModel.joinCoopRaid(raidId) },
+                                    onStrikeRaid = { raidId, surge -> viewModel.strikeCoopRaid(raidId, surge) },
+                                    onClaimRaidReward = { raidId -> viewModel.claimCoopRaidReward(raidId) },
+                                    onCloseRaid = { raidId -> viewModel.closeCoopRaid(raidId) },
+                                    onCreateGuild = { name, motto -> viewModel.createGuild(name, motto) },
+                                    onJoinGuild = { guildId -> viewModel.joinGuild(guildId) },
+                                    onLeaveGuild = { viewModel.leaveGuild() },
+                                    onSendGuildMessage = { msg -> viewModel.sendGuildChatMessage(msg) },
+                                    onVisitTownMarketForCrest = { viewModel.visitTownNpc(TownNpcRole.MATERIALS_MERCHANT) },
                                     modifier = contentModifier
                                 )
                             }
@@ -944,7 +1003,10 @@ fun SolstrideAppShell(
             onBuyPetGear = { gear -> viewModel.buyPetGear(gear) },
             onOpenPetsTab = { viewModel.selectTab(SolstrideTab.PETS) },
             onBuyBlackMarketOffer = { offer -> viewModel.buyBlackMarketOffer(offer) },
-            onHireMercenaryContract = { contract -> viewModel.hireMercenaryContract(contract) }
+            onHireMercenaryContract = { contract -> viewModel.hireMercenaryContract(contract) },
+            onUpgradeBuilding = { bldg -> viewModel.upgradeTownBuilding(bldg) },
+            onBuyPetCatalyst = { cat -> viewModel.buyPetEvolutionCatalyst(cat) },
+            onBrewAlchemistInteractive = { recipe, grade -> viewModel.completeAlchemistBrew(recipe, grade) }
         )
     }
 
@@ -957,6 +1019,24 @@ fun SolstrideAppShell(
             onChallengeDuel = { target -> viewModel.challengePlayerToDuel(target) },
             onInvitePetPlaydate = { target -> viewModel.invitePetPlaydate(target) },
             onDismiss = { viewModel.inspectTownPlayer(null) }
+        )
+    }
+
+    // One-Time Fresh Journey v2 Step-Preserving Reset Celebration Dialog
+    val migrationBanner = freshJourneyBanner
+    if (migrationBanner != null) {
+        FreshJourneyMigrationDialog(
+            banner = migrationBanner,
+            onDismiss = { viewModel.dismissFreshJourneyBanner() }
+        )
+    }
+
+    // Pet Evolution Awakening Ceremony Celebration Dialog
+    val evolvedCeremonyPet = recentEvolutionCeremonyPet
+    if (evolvedCeremonyPet != null) {
+        PetEvolutionCeremonyDialog(
+            evolvedPet = evolvedCeremonyPet,
+            onDismiss = { viewModel.dismissEvolutionCeremony() }
         )
     }
 }

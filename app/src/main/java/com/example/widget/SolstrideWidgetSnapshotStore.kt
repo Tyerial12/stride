@@ -180,6 +180,9 @@ data class WidgetSnapshotState(
     }
 
     fun sleepStatusSummary(): String {
+        if (!isWatchConnected) {
+            return "☀ Watch Disconnected • Steps fuel Energy & Stamina"
+        }
         if (isHeroSleeping) {
             val reward = ProgressionEngine.computeSleepSolCoinReward(activeSleepMinutes)
             val dur = if (activeSleepMinutes >= 60L) {
@@ -196,10 +199,9 @@ data class WidgetSnapshotState(
             val hrs = lastCompletedSleepMinutes / 60L
             val mins = lastCompletedSleepMinutes % 60L
             val fmt = if (hrs > 0L) "${hrs}h ${mins}m" else "${mins}m"
-            return "☀ Last Sleep $fmt • +${reward.solCoinsEarned}/50 Sol Coins"
+            return "☀ Watch Connected • Last Sleep $fmt (+${reward.solCoinsEarned}/50 Coins)"
         }
-        return if (isWatchConnected) "☀ Watch Sleep Ready • Up to 50 Sol Coins"
-        else "☀ Link Watch • Sleep grants up to 50 Sol Coins"
+        return "☀ Watch Connected • Sleep grants up to 50 Sol Coins"
     }
 
     fun formattedSyncTime(): String {
@@ -722,11 +724,15 @@ object SolstrideWidgetSnapshotStore {
         isWatchConnected: Boolean
     ) {
         val p = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        p.edit()
+        val editor = p.edit()
             .putBoolean("isWatchConnected", isWatchConnected)
             .putString("stepSourceLabel", if (isWatchConnected) "Watch Linked" else "Phone Live")
             .putLong("lastUpdatedMs", System.currentTimeMillis())
-            .apply()
+        if (!isWatchConnected) {
+            editor.putBoolean("isHeroSleeping", false)
+            editor.putString("sleepSourceLabel", "")
+        }
+        editor.apply()
     }
 
     fun updateHeroSleepingOnly(

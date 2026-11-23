@@ -87,6 +87,29 @@ class SolstridePreferences(private val context: Context) {
         val REALM_FOG_STEPS_RAW = stringPreferencesKey("rpg_realm_fog_steps_raw")
         val TOWN_MERCHANT_DATE_KEY = stringPreferencesKey("rpg_town_merchant_date_key")
         val TOWN_MERCHANT_PURCHASED_RAW = stringPreferencesKey("rpg_town_merchant_purchased_raw")
+        val ACTIVITY_MASTERY_XP_RAW = stringPreferencesKey("rpg_activity_mastery_xp_raw")
+        val COLLECTED_RELIC_IDS_RAW = stringPreferencesKey("rpg_collected_relic_ids_raw")
+        val WILDS_HARVESTED_KEYS_RAW = stringPreferencesKey("rpg_wilds_harvested_keys_raw")
+        val RELAXED_TIMING_ASSIST = booleanPreferencesKey("rpg_relaxed_timing_assist")
+
+        // Step & Sleep Real-Life RPG Expansion Keys
+        val HERO_STAMINA = intPreferencesKey("rpg_hero_stamina")
+        val MAX_HERO_STAMINA = intPreferencesKey("rpg_max_hero_stamina")
+        val ACTIVE_DREAM_TIER_ID = stringPreferencesKey("rpg_active_dream_tier_id")
+        val LAST_SLEEP_DURATION_MIN = intPreferencesKey("rpg_last_sleep_duration_min")
+        val LAST_SANCTUARY_REST_DATE = stringPreferencesKey("rpg_last_sanctuary_rest_date")
+        val DREAM_SHARDS = longPreferencesKey("rpg_dream_shards")
+        val AGILITY_STAT = intPreferencesKey("rpg_agility_stat")
+        val PERCEPTION_STAT = intPreferencesKey("rpg_perception_stat")
+        val CONSTELLATION_RANKS_RAW = stringPreferencesKey("rpg_constellation_ranks_raw")
+        val ITEM_AFFIX_MAP_RAW = stringPreferencesKey("rpg_item_affix_map_raw")
+        val ACTIVE_DUNGEON_ID = stringPreferencesKey("rpg_active_dungeon_id")
+        val ACTIVE_DUNGEON_ROOM_INDEX = intPreferencesKey("rpg_active_dungeon_room_index")
+        val ACTIVE_DUNGEON_ROOM_STEPS = intPreferencesKey("rpg_active_dungeon_room_steps")
+        val DUNGEON_CLEARS_COUNT = intPreferencesKey("rpg_dungeon_clears_count")
+        val SLAYER_CONTRACT_STEPS_RAW = stringPreferencesKey("rpg_slayer_contract_steps_raw")
+        val SLAYER_CONTRACT_KILLS_RAW = stringPreferencesKey("rpg_slayer_contract_kills_raw")
+        val SLAYER_CONTRACTS_COMPLETED = intPreferencesKey("rpg_slayer_contracts_completed")
     }
 
     val settingsFlow: Flow<SolstrideSettings> = context.solstrideDataStore.data.map { prefs ->
@@ -132,7 +155,28 @@ class SolstridePreferences(private val context: Context) {
             shrineBattlesLeft = (prefs[Keys.SHRINE_BATTLES_LEFT] ?: 0).coerceAtLeast(0),
             itemDurabilityMap = parseKeyIntMap(prefs[Keys.ITEM_DURABILITY_RAW] ?: ""),
             bestiaryDefeatsMap = parseKeyIntMap(prefs[Keys.BESTIARY_DEFEATS_RAW] ?: ""),
-            unlockedRunesMap = parseKeyIntMap(prefs[Keys.UNLOCKED_RUNES_RAW] ?: "")
+            unlockedRunesMap = parseKeyIntMap(prefs[Keys.UNLOCKED_RUNES_RAW] ?: ""),
+            activityMasteryXpMap = parseKeyIntMap(prefs[Keys.ACTIVITY_MASTERY_XP_RAW] ?: ""),
+            collectedRelicIds = parseIdList(prefs[Keys.COLLECTED_RELIC_IDS_RAW] ?: "").toSet(),
+            wildsHarvestedKeys = parseIdList(prefs[Keys.WILDS_HARVESTED_KEYS_RAW] ?: "").toSet(),
+            relaxedTimingAssist = prefs[Keys.RELAXED_TIMING_ASSIST] ?: false,
+            heroStamina = (prefs[Keys.HERO_STAMINA] ?: 85).coerceIn(0, 400),
+            maxHeroStamina = (prefs[Keys.MAX_HERO_STAMINA] ?: 100).coerceIn(80, 350),
+            activeDreamTierId = prefs[Keys.ACTIVE_DREAM_TIER_ID] ?: "RESTORATIVE_SLUMBER",
+            lastSleepDurationMinutes = (prefs[Keys.LAST_SLEEP_DURATION_MIN] ?: 390).coerceIn(0, 1440),
+            lastSanctuaryRestDateKey = prefs[Keys.LAST_SANCTUARY_REST_DATE] ?: "",
+            dreamShards = (prefs[Keys.DREAM_SHARDS] ?: 3L).coerceAtLeast(0L),
+            agilityStat = (prefs[Keys.AGILITY_STAT] ?: 5).coerceIn(5, 999),
+            perceptionStat = (prefs[Keys.PERCEPTION_STAT] ?: 5).coerceIn(5, 999),
+            constellationRanksMap = parseKeyIntMap(prefs[Keys.CONSTELLATION_RANKS_RAW] ?: ""),
+            itemAffixMap = parseKeyStringMap(prefs[Keys.ITEM_AFFIX_MAP_RAW] ?: ""),
+            activeDungeonId = prefs[Keys.ACTIVE_DUNGEON_ID] ?: "dungeon_sunstone_catacombs",
+            activeDungeonRoomIndex = (prefs[Keys.ACTIVE_DUNGEON_ROOM_INDEX] ?: 0).coerceAtLeast(0),
+            activeDungeonRoomSteps = (prefs[Keys.ACTIVE_DUNGEON_ROOM_STEPS] ?: 0).coerceAtLeast(0),
+            dungeonClearsCount = (prefs[Keys.DUNGEON_CLEARS_COUNT] ?: 0).coerceAtLeast(0),
+            slayerContractStepsMap = parseKeyIntMap(prefs[Keys.SLAYER_CONTRACT_STEPS_RAW] ?: ""),
+            slayerContractKillsMap = parseKeyIntMap(prefs[Keys.SLAYER_CONTRACT_KILLS_RAW] ?: ""),
+            slayerContractsCompleted = (prefs[Keys.SLAYER_CONTRACTS_COMPLETED] ?: 0).coerceAtLeast(0)
         )
     }
 
@@ -166,6 +210,24 @@ class SolstridePreferences(private val context: Context) {
             .joinToString(",") { "${it.key}:${it.value}" }
     }
 
+    private fun parseKeyStringMap(raw: String): Map<String, String> {
+        if (raw.isBlank()) return emptyMap()
+        return raw.split(",")
+            .mapNotNull { entry ->
+                val parts = entry.split(":", limit = 2)
+                if (parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
+                    parts[0].trim() to parts[1].trim()
+                } else null
+            }
+            .toMap()
+    }
+
+    private fun encodeKeyStringMap(map: Map<String, String>): String {
+        return map.entries
+            .filter { it.key.isNotBlank() && it.value.isNotBlank() }
+            .joinToString(",") { "${it.key}:${it.value}" }
+    }
+
     suspend fun updateHardcoreRpgState(transform: (HardcoreRpgState) -> HardcoreRpgState) {
         val current = hardcoreRpgStateFlow.first()
         val next = transform(current)
@@ -192,12 +254,36 @@ class SolstridePreferences(private val context: Context) {
             prefs[Keys.ITEM_DURABILITY_RAW] = encodeKeyIntMap(next.itemDurabilityMap)
             prefs[Keys.BESTIARY_DEFEATS_RAW] = encodeKeyIntMap(next.bestiaryDefeatsMap)
             prefs[Keys.UNLOCKED_RUNES_RAW] = encodeKeyIntMap(next.unlockedRunesMap)
+            prefs[Keys.ACTIVITY_MASTERY_XP_RAW] = encodeKeyIntMap(next.activityMasteryXpMap)
+            prefs[Keys.COLLECTED_RELIC_IDS_RAW] = next.collectedRelicIds.joinToString(",")
+            prefs[Keys.WILDS_HARVESTED_KEYS_RAW] = next.wildsHarvestedKeys.toList().takeLast(200).joinToString(",")
+            prefs[Keys.RELAXED_TIMING_ASSIST] = next.relaxedTimingAssist
+            prefs[Keys.HERO_STAMINA] = next.heroStamina.coerceIn(0, 400)
+            prefs[Keys.MAX_HERO_STAMINA] = next.maxHeroStamina.coerceIn(80, 350)
+            prefs[Keys.ACTIVE_DREAM_TIER_ID] = next.activeDreamTierId
+            prefs[Keys.LAST_SLEEP_DURATION_MIN] = next.lastSleepDurationMinutes.coerceIn(0, 1440)
+            prefs[Keys.LAST_SANCTUARY_REST_DATE] = next.lastSanctuaryRestDateKey
+            prefs[Keys.DREAM_SHARDS] = next.dreamShards.coerceAtLeast(0L)
+            prefs[Keys.AGILITY_STAT] = next.agilityStat.coerceIn(5, 999)
+            prefs[Keys.PERCEPTION_STAT] = next.perceptionStat.coerceIn(5, 999)
+            prefs[Keys.CONSTELLATION_RANKS_RAW] = encodeKeyIntMap(next.constellationRanksMap)
+            prefs[Keys.ITEM_AFFIX_MAP_RAW] = encodeKeyStringMap(next.itemAffixMap)
+            prefs[Keys.ACTIVE_DUNGEON_ID] = next.activeDungeonId
+            prefs[Keys.ACTIVE_DUNGEON_ROOM_INDEX] = next.activeDungeonRoomIndex.coerceAtLeast(0)
+            prefs[Keys.ACTIVE_DUNGEON_ROOM_STEPS] = next.activeDungeonRoomSteps.coerceAtLeast(0)
+            prefs[Keys.DUNGEON_CLEARS_COUNT] = next.dungeonClearsCount.coerceAtLeast(0)
+            prefs[Keys.SLAYER_CONTRACT_STEPS_RAW] = encodeKeyIntMap(next.slayerContractStepsMap)
+            prefs[Keys.SLAYER_CONTRACT_KILLS_RAW] = encodeKeyIntMap(next.slayerContractKillsMap)
+            prefs[Keys.SLAYER_CONTRACTS_COMPLETED] = next.slayerContractsCompleted.coerceAtLeast(0)
         }
     }
 
-    suspend fun resetAllRpgAndStepProgress() {
+    /**
+     * Resets all local RPG progression (materials, fog, bestiary, masteries, relics, wilds nodes)
+     * while strictly preserving real-world step telemetry, watch watermarks, and pedometer counts.
+     */
+    suspend fun resetRpgProgressKeepingSteps() {
         context.solstrideDataStore.edit { prefs ->
-            prefs[Keys.PEDOMETER_DAILY_STEPS] = 0L
             prefs[Keys.SUNSTEEL_ORE] = 0L
             prefs[Keys.AETHER_HERBS] = 0L
             prefs[Keys.ELEMENTAL_ESSENCE] = 0L
@@ -220,7 +306,34 @@ class SolstridePreferences(private val context: Context) {
             prefs[Keys.ITEM_DURABILITY_RAW] = ""
             prefs[Keys.BESTIARY_DEFEATS_RAW] = ""
             prefs[Keys.UNLOCKED_RUNES_RAW] = ""
+            prefs[Keys.ACTIVITY_MASTERY_XP_RAW] = ""
+            prefs[Keys.COLLECTED_RELIC_IDS_RAW] = ""
+            prefs[Keys.WILDS_HARVESTED_KEYS_RAW] = ""
             prefs[Keys.CONSUMED_CHEST_IDS_RAW] = ""
+            prefs[Keys.HERO_STAMINA] = 85
+            prefs[Keys.MAX_HERO_STAMINA] = 100
+            prefs[Keys.ACTIVE_DREAM_TIER_ID] = "RESTORATIVE_SLUMBER"
+            prefs[Keys.LAST_SLEEP_DURATION_MIN] = 390
+            prefs[Keys.LAST_SANCTUARY_REST_DATE] = ""
+            prefs[Keys.DREAM_SHARDS] = 3L
+            prefs[Keys.AGILITY_STAT] = 5
+            prefs[Keys.PERCEPTION_STAT] = 5
+            prefs[Keys.CONSTELLATION_RANKS_RAW] = ""
+            prefs[Keys.ITEM_AFFIX_MAP_RAW] = ""
+            prefs[Keys.ACTIVE_DUNGEON_ID] = "dungeon_sunstone_catacombs"
+            prefs[Keys.ACTIVE_DUNGEON_ROOM_INDEX] = 0
+            prefs[Keys.ACTIVE_DUNGEON_ROOM_STEPS] = 0
+            prefs[Keys.DUNGEON_CLEARS_COUNT] = 0
+            prefs[Keys.SLAYER_CONTRACT_STEPS_RAW] = ""
+            prefs[Keys.SLAYER_CONTRACT_KILLS_RAW] = ""
+            prefs[Keys.SLAYER_CONTRACTS_COMPLETED] = 0
+        }
+    }
+
+    suspend fun resetAllRpgAndStepProgress() {
+        resetRpgProgressKeepingSteps()
+        context.solstrideDataStore.edit { prefs ->
+            prefs[Keys.PEDOMETER_DAILY_STEPS] = 0L
         }
     }
 

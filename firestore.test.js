@@ -703,3 +703,258 @@ test("MultiplayerPetPlaydates: participant-scoped invite, accept, live play acti
   await assertSucceeds(bobDb.collection("multiplayer_pet_playdates").doc("play_1").delete());
 });
 
+test("HeroProfile v2 fields & OwnedPet evolution/bond fields validate and enforce bounds", async () => {
+  const ts = new Date(Date.now() - 5000);
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).set({
+      ...validHeroProfile(ALICE_UID, ts),
+      migrationVersion: 2,
+      guildId: "",
+      seasonKey: "S1_DAWN_EVOLUTION",
+      seasonXp: 0,
+      claimedSeasonTiers: [],
+      townBuildingLevels: "1,1,1,1,1",
+      evolutionShards: 3,
+      mythicCores: 1,
+      guildCrestsOwned: 1,
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      townBuildingLevels: "3,2,4,2,5",
+      seasonXp: 1200,
+      claimedSeasonTiers: [1, 2, 3],
+      evolutionShards: 5,
+      mythicCores: 2,
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  // Reject out-of-range townBuildingLevels (> 5)
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      townBuildingLevels: "6,1,1,1,1",
+      updatedAt: new Date(Date.now() - 400),
+    })
+  );
+
+  // OwnedPet with evolutionStage, evolutionBranch, bondXp, stepsWalkedWithPet, dailyCareActions
+  const petsCol = aliceDb.collection("users").doc(ALICE_UID).collection("pets");
+  await assertSucceeds(
+    petsCol.doc("SUNFOX_KIT").set({
+      ...validOwnedPet(ALICE_UID, "SUNFOX_KIT", ts),
+      evolutionStage: 1,
+      evolutionBranch: "NONE",
+      bondXp: 0,
+      stepsWalkedWithPet: 0,
+      lastCareDateKey: "",
+      dailyCareActions: 0,
+    })
+  );
+
+  await assertSucceeds(
+    petsCol.doc("SUNFOX_KIT").update({
+      level: 10,
+      evolutionStage: 2,
+      evolutionBranch: "VANGUARD",
+      bondXp: 280,
+      stepsWalkedWithPet: 1500,
+      lastCareDateKey: "2026-11-22",
+      dailyCareActions: 3,
+      updatedAt: new Date(Date.now() - 400),
+    })
+  );
+
+  // Reject invalid evolutionBranch or stage > 3
+  await assertFails(
+    petsCol.doc("SUNFOX_KIT").update({
+      evolutionBranch: "HACKED",
+      updatedAt: new Date(Date.now() - 300),
+    })
+  );
+  await assertFails(
+    petsCol.doc("SUNFOX_KIT").update({
+      evolutionStage: 4,
+      updatedAt: new Date(Date.now() - 300),
+    })
+  );
+});
+
+test("WeeklyWorldBoss & Contributions: signed-in create/strike/milestone succeed; HP increase & cross-user contribution fail", async () => {
+  const ts = new Date(Date.now() - 2000);
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const weekKey = "2026-W47";
+
+  const bossDoc = {
+    weekKey,
+    bossName: "Apophis World-Eater",
+    elementalAffinity: "EMBER",
+    maxHp: 250000,
+    currentHp: 250000,
+    totalStrikes: 0,
+    publicVisible: true,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  await assertFails(unauthDb.collection("world_bosses").doc(weekKey).get());
+  await assertSucceeds(aliceDb.collection("world_bosses").doc(weekKey).set(bossDoc));
+
+  // Bob strikes world boss (HP decreases, totalStrikes increments)
+  await assertSucceeds(
+    bobDb.collection("world_bosses").doc(weekKey).update({
+      currentHp: 248500,
+      totalStrikes: 1,
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  // Reject healing world boss HP back up
+  await assertFails(
+    bobDb.collection("world_bosses").doc(weekKey).update({
+      currentHp: 250000,
+      totalStrikes: 2,
+      updatedAt: new Date(Date.now() - 400),
+    })
+  );
+
+  // Contribution doc strictly owner-writable
+  const contrib = {
+    userId: BOB_UID,
+    weekKey,
+    displayName: "Kael",
+    totalDamage: 1500,
+    strikesCount: 1,
+    claimedMilestoneTier: 0,
+    updatedAt: new Date(Date.now() - 500),
+  };
+  await assertSucceeds(
+    bobDb.collection("world_bosses").doc(weekKey).collection("contributions").doc(BOB_UID).set(contrib)
+  );
+  await assertFails(
+    aliceDb.collection("world_bosses").doc(weekKey).collection("contributions").doc(BOB_UID).set({
+      ...contrib,
+      totalDamage: 999999,
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("world_bosses").doc(weekKey).collection("contributions").get()
+  );
+});
+
+test("CoopRaids: host create, ally join, shared strike, victory delete & outsider restrictions", async () => {
+  const ts = new Date(Date.now() - 2000);
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+
+  const raid = {
+    hostUid: ALICE_UID,
+    hostName: "Aurelia",
+    bossName: "Solaris Raid Titan",
+    bossAffinity: "SOLAR",
+    bossMaxHp: 12000,
+    bossCurrentHp: 12000,
+    participantUids: [ALICE_UID],
+    participantNames: ["Aurelia"],
+    status: "OPEN",
+    totalTeamDamage: 0,
+    lastActionLog: "Aurelia opened a Co-op Raid!",
+    claimedUids: [],
+    publicVisible: true,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  await assertSucceeds(aliceDb.collection("coop_raids").doc("raid_1").set(raid));
+  await assertSucceeds(bobDb.collection("coop_raids").where("publicVisible", "==", true).get());
+  await assertFails(bobDb.collection("coop_raids").get());
+
+  // Bob joins raid
+  await assertSucceeds(
+    bobDb.collection("coop_raids").doc("raid_1").update({
+      participantUids: [ALICE_UID, BOB_UID],
+      participantNames: ["Aurelia", "Kael"],
+      status: "ACTIVE",
+      lastActionLog: "Kael joined the Raid squad!",
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Bob strikes and finishes raid
+  await assertSucceeds(
+    bobDb.collection("coop_raids").doc("raid_1").update({
+      bossCurrentHp: 0,
+      status: "VICTORY",
+      totalTeamDamage: 12000,
+      lastActionLog: "RAID VICTORY!",
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  // Only host can delete after victory
+  await assertFails(bobDb.collection("coop_raids").doc("raid_1").delete());
+  await assertSucceeds(aliceDb.collection("coop_raids").doc("raid_1").delete());
+});
+
+test("Guilds & GuildChat: create, join, step progress, member-only chat & non-member isolation", async () => {
+  const ts = new Date(Date.now() - 2000);
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const charlieDb = testEnv.authenticatedContext("charlie_outsider_03").firestore();
+
+  const guild = {
+    name: "Dawn Striders",
+    motto: "Every step lights the dawn.",
+    emblemHex: 0xFFF59E0B,
+    leaderUid: ALICE_UID,
+    leaderName: "Aurelia",
+    memberUids: [ALICE_UID],
+    memberNames: ["Aurelia"],
+    weekKey: "2026-W47",
+    weeklyGuildSteps: 3200,
+    weeklyStepGoal: 50000,
+    weeklyBossDamage: 0,
+    guildLevel: 1,
+    publicVisible: true,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  await assertSucceeds(aliceDb.collection("guilds").doc("guild_1").set(guild));
+  await assertSucceeds(bobDb.collection("guilds").where("publicVisible", "==", true).get());
+
+  // Bob joins guild
+  await assertSucceeds(
+    bobDb.collection("guilds").doc("guild_1").update({
+      memberUids: [ALICE_UID, BOB_UID],
+      memberNames: ["Aurelia", "Kael"],
+      updatedAt: new Date(Date.now() - 1000),
+    })
+  );
+
+  // Member Bob posts to guild chat; non-member Charlie cannot read or post
+  const gmsg = {
+    guildId: "guild_1",
+    userId: BOB_UID,
+    displayName: "Kael",
+    heroLevel: 4,
+    message: "Walking 5k steps for our weekly guild chest!",
+    createdAt: new Date(Date.now() - 500),
+  };
+  await assertSucceeds(bobDb.collection("guilds").doc("guild_1").collection("messages").doc("gmsg_1").set(gmsg));
+  await assertSucceeds(aliceDb.collection("guilds").doc("guild_1").collection("messages").get());
+  await assertFails(charlieDb.collection("guilds").doc("guild_1").collection("messages").get());
+  await assertFails(
+    charlieDb.collection("guilds").doc("guild_1").collection("messages").doc("gmsg_2").set({
+      ...gmsg,
+      userId: "charlie_outsider_03",
+    })
+  );
+});
+
+

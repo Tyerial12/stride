@@ -380,6 +380,7 @@ class SolstrideWearableListenerService :
                 WatchHeartbeatRegistry.clear()
                 val preferences = SolstridePreferences(applicationContext)
                 preferences.setLastWatchStepReceivedMs(0L)
+                preferences.setWatchLiveSleeping(false)
                 preferences.setPedometerEnabled(true)
                 StepBackgroundSyncScheduler.ensureScheduled(applicationContext)
                 WatchConnectionBroadcast.sendToggleLocalStepSensorBroadcast(
@@ -392,8 +393,13 @@ class SolstrideWearableListenerService :
                     context = applicationContext,
                     isWatchConnected = false
                 )
+                com.example.widget.SolstrideWidgetSnapshotStore.updateHeroSleepingOnly(
+                    context = applicationContext,
+                    isSleeping = false,
+                    sleepSourceLabel = ""
+                )
                 com.example.widget.SolstrideWidgetUpdater.updateAllWidgets(applicationContext)
-                Log.d(TAG, "Watch unreachable ($displayName): broadcast sent to activate phone pedometer & sync widgets")
+                Log.d(TAG, "Watch unreachable ($displayName): broadcast sent to activate phone pedometer & clear sleep state")
             }
         }
     }

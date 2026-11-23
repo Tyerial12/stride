@@ -7,6 +7,8 @@ import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.ServerTimestamp
 
 enum class MultiplayerSubTab(val label: String) {
+    GUILD("Guild"),
+    RAIDS("Raids"),
     PLAYERS("Players"),
     CHAT("Chat"),
     DUELS("Duels"),

@@ -2,8 +2,13 @@ package com.example.data.firebase
 
 import android.content.Context
 import com.example.R
+import com.example.data.model.CURRENT_MIGRATION_VERSION
+import com.example.data.model.CoopRaidRoom
 import com.example.data.model.DEFAULT_SKILL_RANKS
+import com.example.data.model.DEFAULT_TOWN_BUILDING_LEVELS
+import com.example.data.model.FreshJourneyResetBanner
 import com.example.data.model.GearPerkType
+import com.example.data.model.GuildChatMessage
 import com.example.data.model.HeroAvatarConfig
 import com.example.data.model.HeroClass
 import com.example.data.model.HeroProfile
@@ -16,9 +21,15 @@ import com.example.data.model.MultiplayerChatMessage
 import com.example.data.model.MultiplayerDuel
 import com.example.data.model.MultiplayerPetPlaydate
 import com.example.data.model.OwnedPet
+import com.example.data.model.PetEvolutionBranch
 import com.example.data.model.PetPlayActivity
 import com.example.data.model.PetType
+import com.example.data.model.SeasonCatalog
+import com.example.data.model.SolstrideGuild
 import com.example.data.model.TownPresencePlayer
+import com.example.data.model.WeeklyWorldBoss
+import com.example.data.model.WeeklyWorldBossCatalog
+import com.example.data.model.WorldBossContribution
 import com.example.data.model.currentCalendarDateKey
 import com.example.data.model.currentIsoWeekKey
 import com.google.firebase.Firebase
@@ -220,6 +231,8 @@ class SolstrideFirestoreRepository(
                 "avatarConfig" to presence.resolvedAvatar().serialize(),
                 "equippedPetId" to presence.equippedPetId.take(40),
                 "equippedPetLevel" to presence.equippedPetLevel.coerceIn(1L, 50L),
+                "equippedPetStage" to presence.equippedPetStage.coerceIn(1L, 3L),
+                "equippedPetBranch" to presence.resolvedPetBranch().name,
                 "posX" to presence.posX.coerceIn(0.0, 1.0),
                 "posY" to presence.posY.coerceIn(0.0, 1.0),
                 "facingRight" to presence.facingRight,
@@ -308,6 +321,15 @@ class SolstrideFirestoreRepository(
                     "dailyChestsOpened" to 0L,
                     "claimedQuestIds" to emptyList<String>(),
                     "chestsOpenedTotal" to 0L,
+                    "migrationVersion" to CURRENT_MIGRATION_VERSION,
+                    "guildId" to "",
+                    "seasonKey" to SeasonCatalog.CURRENT_SEASON_KEY,
+                    "seasonXp" to 0L,
+                    "claimedSeasonTiers" to emptyList<Long>(),
+                    "townBuildingLevels" to DEFAULT_TOWN_BUILDING_LEVELS,
+                    "evolutionShards" to 0L,
+                    "mythicCores" to 0L,
+                    "guildCrestsOwned" to 0L,
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -423,6 +445,133 @@ class SolstrideFirestoreRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.DELETE, profilePath)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * One-time idempotent progression reset (migrationVersion < 2 -> 2).
+     * Resets all RPG progression, inventory, chests, pets, currencies, realms, Spire, prestige,
+     * skills, and town buildings to a balanced Level 1 start while 100% preserving totalSteps,
+     * weeklySteps, weekKey, displayName, avatarConfig, and characterCreated.
+     */
+    suspend fun performOneTimeFreshJourneyReset(userId: String): Result<FreshJourneyResetBanner?> {
+        val profilePath = "users/$userId"
+        return try {
+            val uid = requireUserId(userId)
+            val userDoc = db.collection("users").document(uid)
+            val snap = userDoc.get().await()
+            if (!snap.exists()) return Result.success(null)
+
+            val existing = snap.toObject(HeroProfile::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                ?: return Result.success(null)
+
+            if (existing.migrationVersion >= CURRENT_MIGRATION_VERSION) {
+                return Result.success(null)
+            }
+
+            // 1. Delete all inventory, chests, and pets subcollections cleanly
+            val invDocs = userDoc.collection("inventory").get().await()
+            for (doc in invDocs.documents) doc.reference.delete().await()
+
+            val chestDocs = userDoc.collection("chests").get().await()
+            for (doc in chestDocs.documents) doc.reference.delete().await()
+
+            val petDocs = userDoc.collection("pets").get().await()
+            for (doc in petDocs.documents) doc.reference.delete().await()
+
+            // 2. Preserve Steps + Identity strictly; reset RPG progression + stamp migrationVersion = 2
+            val preservedTotalSteps = existing.totalSteps.coerceAtLeast(0L)
+            val preservedWeeklySteps = existing.weeklySteps.coerceAtLeast(0L)
+            val preservedWeekKey = existing.weekKey.ifBlank { currentIsoWeekKey() }
+            val preservedName = existing.displayName.trim().take(50).ifBlank { "Solar Vanguard" }
+            val preservedClass = existing.resolvedClass().name
+            val preservedAvatar = existing.resolvedAvatar().serialize()
+            val todayKey = currentCalendarDateKey()
+
+            val resetUpdates = mapOf(
+                "displayName" to preservedName,
+                "heroClass" to preservedClass,
+                "level" to 1L,
+                "xp" to 0L,
+                "xpToNextLevel" to 120L,
+                "might" to 5L,
+                "vigor" to 5L,
+                "endurance" to 5L,
+                "unspentPoints" to 2L,
+                "currentHp" to 165L,
+                "maxHp" to 165L,
+                "strideEnergy" to 45L,
+                "maxStrideEnergy" to 110L,
+                "encounterProgress" to 40L,
+                "sunshards" to 0L,
+                "solCoins" to 20L,
+                "totalSteps" to preservedTotalSteps,
+                "weeklySteps" to preservedWeeklySteps,
+                "weekKey" to preservedWeekKey,
+                "bossesDefeated" to 0L,
+                "trueBossWins" to 0L,
+                "heroPower" to 220L,
+                "equippedPetId" to "",
+                "expeditionsCompleted" to 0L,
+                "expeditionsFailed" to 0L,
+                "activeExpeditionStartMs" to 0L,
+                "activeExpeditionDurationMin" to 0L,
+                "activeExpeditionEndMs" to 0L,
+                "currentRealm" to 1L,
+                "realmStage" to 1L,
+                "highestRealmCleared" to 0L,
+                "currentSpireFloor" to 1L,
+                "highestSpireFloor" to 0L,
+                "prestigeLevel" to 0L,
+                "skillRanks" to "1,0,0,0,0,0,0,0,0",
+                "dailyQuestDateKey" to todayKey,
+                "dailyBattlesWon" to 0L,
+                "dailyExpeditionsDone" to 0L,
+                "dailyChestsOpened" to 0L,
+                "claimedQuestIds" to emptyList<String>(),
+                "chestsOpenedTotal" to 0L,
+                "avatarConfig" to preservedAvatar,
+                "characterCreated" to existing.characterCreated,
+                "migrationVersion" to CURRENT_MIGRATION_VERSION,
+                "guildId" to "",
+                "seasonKey" to SeasonCatalog.CURRENT_SEASON_KEY,
+                "seasonXp" to 0L,
+                "claimedSeasonTiers" to emptyList<Long>(),
+                "townBuildingLevels" to DEFAULT_TOWN_BUILDING_LEVELS,
+                "evolutionShards" to 0L,
+                "mythicCores" to 0L,
+                "guildCrestsOwned" to 0L,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            userDoc.update(resetUpdates).await()
+
+            // 3. Re-seed Lv 1 starter weapon & sync leaderboard keeping steps
+            seedStarterInventory(uid)
+            upsertLeaderboard(
+                userId = uid,
+                displayName = preservedName,
+                heroClass = preservedClass,
+                heroLevel = 1L,
+                heroPower = 220L,
+                weeklySteps = preservedWeeklySteps,
+                weekKey = preservedWeekKey,
+                bossesDefeated = 0L,
+                prestigeLevel = 0L,
+                highestSpireFloor = 0L
+            )
+
+            Result.success(
+                FreshJourneyResetBanner(
+                    preservedLifetimeSteps = preservedTotalSteps,
+                    preservedWeeklySteps = preservedWeeklySteps,
+                    heroName = preservedName
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, profilePath)
             Result.failure(e)
         }
     }
@@ -570,6 +719,12 @@ class SolstrideFirestoreRepository(
                 "xpToNextLevel" to 60L,
                 "equippedWeaponId" to "",
                 "equippedArmorId" to "",
+                "evolutionStage" to 1L,
+                "evolutionBranch" to PetEvolutionBranch.NONE.name,
+                "bondXp" to 0L,
+                "stepsWalkedWithPet" to 0L,
+                "lastCareDateKey" to "",
+                "dailyCareActions" to 0L,
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
             )
@@ -1066,6 +1221,650 @@ class SolstrideFirestoreRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    // --- Weekly World Boss (/world_bosses/{weekKey}) ---
+
+    fun observeWeeklyWorldBoss(userId: String, weekKey: String): Flow<WeeklyWorldBoss?> = flow {
+        val uid = requireUserId(userId)
+        val path = "world_bosses/$weekKey"
+        emitAll(
+            db.collection("world_bosses").document(weekKey)
+                .snapshots()
+                .map { snap ->
+                    if (snap.exists()) {
+                        snap.toObject(WeeklyWorldBoss::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    } else null
+                }
+                .catch { error ->
+                    val fsError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (fsError == null && error is CancellationException) throw error
+                    if (auth.currentUser?.uid == uid) {
+                        handleFirestoreError(fsError ?: error, OperationType.GET, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    fun observeWorldBossContributions(userId: String, weekKey: String): Flow<List<WorldBossContribution>> = flow {
+        val uid = requireUserId(userId)
+        val path = "world_bosses/$weekKey/contributions"
+        emitAll(
+            db.collection("world_bosses").document(weekKey).collection("contributions")
+                .limit(30)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(WorldBossContribution::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.totalDamage }
+                }
+                .catch { error ->
+                    val fsError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (fsError == null && error is CancellationException) throw error
+                    if (auth.currentUser?.uid == uid) {
+                        handleFirestoreError(fsError ?: error, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun ensureWeeklyWorldBoss(userId: String, weekKey: String): Result<Unit> {
+        val path = "world_bosses/$weekKey"
+        return try {
+            requireUserId(userId)
+            val docRef = db.collection("world_bosses").document(weekKey)
+            val snap = docRef.get().await()
+            if (!snap.exists()) {
+                val tpl = WeeklyWorldBossCatalog.templateForWeek(weekKey)
+                docRef.set(
+                    mapOf(
+                        "weekKey" to weekKey,
+                        "bossName" to tpl.name,
+                        "elementalAffinity" to tpl.affinity.name,
+                        "maxHp" to tpl.maxHp,
+                        "currentHp" to tpl.maxHp,
+                        "totalStrikes" to 0L,
+                        "publicVisible" to true,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun strikeWeeklyWorldBoss(
+        userId: String,
+        weekKey: String,
+        displayName: String,
+        damage: Long
+    ): Result<Long> {
+        val path = "world_bosses/$weekKey"
+        return try {
+            val uid = requireUserId(userId)
+            val safeDamage = damage.coerceIn(10L, 50_000L)
+            val bossRef = db.collection("world_bosses").document(weekKey)
+            val contribRef = bossRef.collection("contributions").document(uid)
+            val tpl = WeeklyWorldBossCatalog.templateForWeek(weekKey)
+
+            val newRemaining = db.runTransaction { txn ->
+                val bossSnap = txn.get(bossRef)
+                val contribSnap = txn.get(contribRef)
+                val curHp = if (bossSnap.exists()) {
+                    bossSnap.getLong("currentHp") ?: tpl.maxHp
+                } else {
+                    tpl.maxHp
+                }
+                val curStrikes = if (bossSnap.exists()) bossSnap.getLong("totalStrikes") ?: 0L else 0L
+                val nextHp = (curHp - safeDamage).coerceAtLeast(0L)
+
+                if (bossSnap.exists()) {
+                    txn.update(
+                        bossRef,
+                        mapOf(
+                            "currentHp" to nextHp,
+                            "totalStrikes" to curStrikes + 1L,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                } else {
+                    txn.set(
+                        bossRef,
+                        mapOf(
+                            "weekKey" to weekKey,
+                            "bossName" to tpl.name,
+                            "elementalAffinity" to tpl.affinity.name,
+                            "maxHp" to tpl.maxHp,
+                            "currentHp" to nextHp,
+                            "totalStrikes" to 1L,
+                            "publicVisible" to true,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+
+                val prevDmg = if (contribSnap.exists()) contribSnap.getLong("totalDamage") ?: 0L else 0L
+                val prevCount = if (contribSnap.exists()) contribSnap.getLong("strikesCount") ?: 0L else 0L
+                val prevClaimed = if (contribSnap.exists()) contribSnap.getLong("claimedMilestoneTier") ?: 0L else 0L
+                txn.set(
+                    contribRef,
+                    mapOf(
+                        "userId" to uid,
+                        "weekKey" to weekKey,
+                        "displayName" to displayName.trim().take(50).ifBlank { "Strider" },
+                        "totalDamage" to (prevDmg + safeDamage).coerceAtMost(100_000_000L),
+                        "strikesCount" to (prevCount + 1L).coerceAtMost(100_000L),
+                        "claimedMilestoneTier" to prevClaimed,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                nextHp
+            }.await()
+            Result.success(newRemaining)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateWorldBossClaimedMilestone(
+        userId: String,
+        weekKey: String,
+        displayName: String,
+        totalDamage: Long,
+        strikesCount: Long,
+        claimedTier: Long
+    ): Result<Unit> {
+        val path = "world_bosses/$weekKey/contributions/$userId"
+        return try {
+            val uid = requireUserId(userId)
+            db.collection("world_bosses").document(weekKey)
+                .collection("contributions").document(uid)
+                .set(
+                    mapOf(
+                        "userId" to uid,
+                        "weekKey" to weekKey,
+                        "displayName" to displayName.trim().take(50).ifBlank { "Strider" },
+                        "totalDamage" to totalDamage.coerceIn(0L, 100_000_000L),
+                        "strikesCount" to strikesCount.coerceIn(0L, 100_000L),
+                        "claimedMilestoneTier" to claimedTier.coerceIn(0L, 10L),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    // --- Co-op Boss Raid Rooms (/coop_raids/{raidId}) ---
+
+    fun observeCoopRaids(userId: String): Flow<List<CoopRaidRoom>> = flow {
+        val uid = requireUserId(userId)
+        val path = "coop_raids"
+        emitAll(
+            db.collection("coop_raids")
+                .whereEqualTo("publicVisible", true)
+                .limit(20)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(CoopRaidRoom::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.updatedAt?.seconds ?: 0L }
+                }
+                .catch { error ->
+                    val fsError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (fsError == null && error is CancellationException) throw error
+                    if (auth.currentUser?.uid == uid) {
+                        handleFirestoreError(fsError ?: error, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun createCoopRaid(
+        userId: String,
+        hostName: String,
+        bossName: String,
+        bossAffinity: String,
+        bossMaxHp: Long
+    ): Result<String> {
+        val docId = "raid_${UUID.randomUUID().toString().replace("-", "").take(14)}"
+        val path = "coop_raids/$docId"
+        return try {
+            val uid = requireUserId(userId)
+            val safeHost = hostName.trim().take(50).ifBlank { "Strider" }
+            val safeMaxHp = bossMaxHp.coerceIn(2_000L, 500_000L)
+            val payload = mapOf(
+                "hostUid" to uid,
+                "hostName" to safeHost,
+                "bossName" to bossName.trim().take(60).ifBlank { "Solaris Raid Titan" },
+                "bossAffinity" to bossAffinity,
+                "bossMaxHp" to safeMaxHp,
+                "bossCurrentHp" to safeMaxHp,
+                "participantUids" to listOf(uid),
+                "participantNames" to listOf(safeHost),
+                "status" to "OPEN",
+                "totalTeamDamage" to 0L,
+                "lastActionLog" to "$safeHost opened a Co-op Raid vs $bossName!".take(240),
+                "claimedUids" to emptyList<String>(),
+                "publicVisible" to true,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            db.collection("coop_raids").document(docId).set(payload).await()
+            Result.success(docId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun joinCoopRaid(userId: String, displayName: String, raidId: String): Result<Unit> {
+        val path = "coop_raids/$raidId"
+        return try {
+            val uid = requireUserId(userId)
+            val safeName = displayName.trim().take(50).ifBlank { "Strider" }
+            val docRef = db.collection("coop_raids").document(raidId)
+            db.runTransaction { txn ->
+                val snap = txn.get(docRef)
+                if (!snap.exists()) throw IllegalStateException("Raid room no longer exists.")
+                @Suppress("UNCHECKED_CAST")
+                val uids = (snap.get("participantUids") as? List<String>)?.toMutableList() ?: mutableListOf()
+                @Suppress("UNCHECKED_CAST")
+                val names = (snap.get("participantNames") as? List<String>)?.toMutableList() ?: mutableListOf()
+                if (uid !in uids) {
+                    if (uids.size >= 4) throw IllegalStateException("Raid party is full (4/4).")
+                    uids.add(uid)
+                    names.add(safeName)
+                }
+                val status = if (snap.getString("status") == "OPEN" && uids.size >= 2) "ACTIVE" else (snap.getString("status") ?: "OPEN")
+                txn.update(
+                    docRef,
+                    mapOf(
+                        "participantUids" to uids,
+                        "participantNames" to names,
+                        "status" to status,
+                        "lastActionLog" to "$safeName joined the Raid squad!".take(240),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun strikeCoopRaid(
+        userId: String,
+        displayName: String,
+        raidId: String,
+        damage: Long,
+        actionLabel: String
+    ): Result<Boolean> {
+        val path = "coop_raids/$raidId"
+        return try {
+            val uid = requireUserId(userId)
+            val safeName = displayName.trim().take(50).ifBlank { "Strider" }
+            val safeDamage = damage.coerceIn(10L, 50_000L)
+            val docRef = db.collection("coop_raids").document(raidId)
+            val defeated = db.runTransaction { txn ->
+                val snap = txn.get(docRef)
+                if (!snap.exists()) throw IllegalStateException("Raid room closed.")
+                @Suppress("UNCHECKED_CAST")
+                val uids = (snap.get("participantUids") as? List<String>) ?: emptyList()
+                if (uid !in uids) throw IllegalStateException("Join the Raid first.")
+                val curHp = snap.getLong("bossCurrentHp") ?: 0L
+                val curTotal = snap.getLong("totalTeamDamage") ?: 0L
+                val nextHp = (curHp - safeDamage).coerceAtLeast(0L)
+                val nextStatus = if (nextHp <= 0L) "VICTORY" else "ACTIVE"
+                val log = if (nextHp <= 0L) {
+                    "$safeName landed the killing $actionLabel ($safeDamage DMG)! RAID VICTORY!"
+                } else {
+                    "$safeName hit with $actionLabel for $safeDamage DMG!"
+                }
+                txn.update(
+                    docRef,
+                    mapOf(
+                        "bossCurrentHp" to nextHp,
+                        "status" to nextStatus,
+                        "totalTeamDamage" to (curTotal + safeDamage).coerceAtMost(10_000_000L),
+                        "lastActionLog" to log.take(240),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                nextHp <= 0L
+            }.await()
+            Result.success(defeated)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun markCoopRaidRewardClaimed(userId: String, raidId: String): Result<Unit> {
+        val path = "coop_raids/$raidId"
+        return try {
+            val uid = requireUserId(userId)
+            val docRef = db.collection("coop_raids").document(raidId)
+            db.runTransaction { txn ->
+                val snap = txn.get(docRef)
+                if (!snap.exists()) return@runTransaction
+                @Suppress("UNCHECKED_CAST")
+                val claimed = (snap.get("claimedUids") as? List<String>)?.toMutableList() ?: mutableListOf()
+                if (uid !in claimed) {
+                    claimed.add(uid)
+                    txn.update(
+                        docRef,
+                        mapOf(
+                            "claimedUids" to claimed,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteCoopRaid(userId: String, raidId: String): Result<Unit> {
+        val path = "coop_raids/$raidId"
+        return try {
+            requireUserId(userId)
+            db.collection("coop_raids").document(raidId).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    // --- Step-Powered Guilds (/guilds/{guildId} & /guilds/{guildId}/messages) ---
+
+    fun observeGuilds(userId: String): Flow<List<SolstrideGuild>> = flow {
+        val uid = requireUserId(userId)
+        val path = "guilds"
+        emitAll(
+            db.collection("guilds")
+                .whereEqualTo("publicVisible", true)
+                .limit(30)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(SolstrideGuild::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.weeklyGuildSteps }
+                }
+                .catch { error ->
+                    val fsError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (fsError == null && error is CancellationException) throw error
+                    if (auth.currentUser?.uid == uid) {
+                        handleFirestoreError(fsError ?: error, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    fun observeGuildChat(userId: String, guildId: String): Flow<List<GuildChatMessage>> = flow {
+        val uid = requireUserId(userId)
+        val path = "guilds/$guildId/messages"
+        emitAll(
+            db.collection("guilds").document(guildId).collection("messages")
+                .limit(50)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(GuildChatMessage::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedBy { it.createdAt?.seconds ?: Long.MAX_VALUE }
+                        .takeLast(40)
+                }
+                .catch { error ->
+                    val fsError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (fsError == null && error is CancellationException) throw error
+                    if (auth.currentUser?.uid == uid) {
+                        handleFirestoreError(fsError ?: error, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
+    suspend fun createGuild(
+        userId: String,
+        leaderName: String,
+        guildName: String,
+        motto: String,
+        emblemHex: Long,
+        initialWeeklySteps: Long
+    ): Result<String> {
+        val docId = "guild_${UUID.randomUUID().toString().replace("-", "").take(14)}"
+        val path = "guilds/$docId"
+        return try {
+            val uid = requireUserId(userId)
+            val safeName = guildName.trim().take(36)
+            require(safeName.length >= 2) { "Guild name must be at least 2 characters." }
+            val safeMotto = motto.trim().take(90).ifBlank { "Every step lights the dawn." }
+            val safeLeader = leaderName.trim().take(50).ifBlank { "Strider" }
+            val payload = mapOf(
+                "name" to safeName,
+                "motto" to safeMotto,
+                "emblemHex" to emblemHex,
+                "leaderUid" to uid,
+                "leaderName" to safeLeader,
+                "memberUids" to listOf(uid),
+                "memberNames" to listOf(safeLeader),
+                "weekKey" to currentIsoWeekKey(),
+                "weeklyGuildSteps" to initialWeeklySteps.coerceIn(0L, 100_000_000L),
+                "weeklyStepGoal" to 50_000L,
+                "weeklyBossDamage" to 0L,
+                "guildLevel" to 1L,
+                "publicVisible" to true,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            db.collection("guilds").document(docId).set(payload).await()
+            Result.success(docId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun joinGuild(userId: String, displayName: String, guildId: String): Result<Unit> {
+        val path = "guilds/$guildId"
+        return try {
+            val uid = requireUserId(userId)
+            val safeName = displayName.trim().take(50).ifBlank { "Strider" }
+            val docRef = db.collection("guilds").document(guildId)
+            db.runTransaction { txn ->
+                val snap = txn.get(docRef)
+                if (!snap.exists()) throw IllegalStateException("Guild not found.")
+                @Suppress("UNCHECKED_CAST")
+                val uids = (snap.get("memberUids") as? List<String>)?.toMutableList() ?: mutableListOf()
+                @Suppress("UNCHECKED_CAST")
+                val names = (snap.get("memberNames") as? List<String>)?.toMutableList() ?: mutableListOf()
+                if (uid !in uids) {
+                    if (uids.size >= 25) throw IllegalStateException("Guild roster is full (25/25).")
+                    uids.add(uid)
+                    names.add(safeName)
+                    txn.update(
+                        docRef,
+                        mapOf(
+                            "memberUids" to uids,
+                            "memberNames" to names,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun leaveGuild(userId: String, guildId: String): Result<Unit> {
+        val path = "guilds/$guildId"
+        return try {
+            val uid = requireUserId(userId)
+            val docRef = db.collection("guilds").document(guildId)
+            val snap = docRef.get().await()
+            if (!snap.exists()) return Result.success(Unit)
+            @Suppress("UNCHECKED_CAST")
+            val uids = (snap.get("memberUids") as? List<String>)?.toMutableList() ?: mutableListOf()
+            @Suppress("UNCHECKED_CAST")
+            val names = (snap.get("memberNames") as? List<String>)?.toMutableList() ?: mutableListOf()
+            val idx = uids.indexOf(uid)
+            if (idx >= 0) {
+                uids.removeAt(idx)
+                if (idx < names.size) names.removeAt(idx)
+            }
+            if (uids.isEmpty()) {
+                docRef.delete().await()
+            } else {
+                val curLeader = snap.getString("leaderUid") ?: ""
+                val nextLeaderUid = if (curLeader == uid) uids.first() else curLeader
+                val nextLeaderName = if (curLeader == uid) names.firstOrNull().orEmpty().ifBlank { "Strider" }
+                else snap.getString("leaderName").orEmpty().ifBlank { "Strider" }
+                docRef.update(
+                    mapOf(
+                        "memberUids" to uids,
+                        "memberNames" to names,
+                        "leaderUid" to nextLeaderUid,
+                        "leaderName" to nextLeaderName,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun contributeGuildProgress(
+        userId: String,
+        guildId: String,
+        stepsDelta: Long,
+        bossDamageDelta: Long = 0L
+    ): Result<Unit> {
+        if (guildId.isBlank() || (stepsDelta <= 0L && bossDamageDelta <= 0L)) return Result.success(Unit)
+        val path = "guilds/$guildId"
+        return try {
+            val uid = requireUserId(userId)
+            val docRef = db.collection("guilds").document(guildId)
+            val nowWeek = currentIsoWeekKey()
+            db.runTransaction { txn ->
+                val snap = txn.get(docRef)
+                if (!snap.exists()) return@runTransaction
+                @Suppress("UNCHECKED_CAST")
+                val uids = (snap.get("memberUids") as? List<String>) ?: emptyList()
+                if (uid !in uids) return@runTransaction
+                val storedWeek = snap.getString("weekKey") ?: nowWeek
+                val baseSteps = if (storedWeek == nowWeek) (snap.getLong("weeklyGuildSteps") ?: 0L) else 0L
+                val baseDmg = if (storedWeek == nowWeek) (snap.getLong("weeklyBossDamage") ?: 0L) else 0L
+                val nextSteps = (baseSteps + stepsDelta.coerceAtLeast(0L)).coerceAtMost(100_000_000L)
+                val nextDmg = (baseDmg + bossDamageDelta.coerceAtLeast(0L)).coerceAtMost(100_000_000L)
+                val curLevel = snap.getLong("guildLevel") ?: 1L
+                val curGoal = snap.getLong("weeklyStepGoal") ?: 50_000L
+                val nextLevel = if (nextSteps >= curGoal && curLevel < 50L) curLevel + 1L else curLevel
+                val nextGoal = if (nextLevel > curLevel) (curGoal + 25_000L).coerceAtMost(10_000_000L) else curGoal
+                txn.update(
+                    docRef,
+                    mapOf(
+                        "weekKey" to nowWeek,
+                        "weeklyGuildSteps" to nextSteps,
+                        "weeklyBossDamage" to nextDmg,
+                        "guildLevel" to nextLevel,
+                        "weeklyStepGoal" to nextGoal,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun sendGuildChatMessage(
+        userId: String,
+        guildId: String,
+        displayName: String,
+        heroLevel: Long,
+        rawMessage: String
+    ): Result<Unit> {
+        val docId = "gmsg_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+        val path = "guilds/$guildId/messages/$docId"
+        return try {
+            val uid = requireUserId(userId)
+            val clean = rawMessage.trim().take(240)
+            require(clean.isNotEmpty()) { "Message cannot be empty" }
+            val payload = mapOf(
+                "guildId" to guildId,
+                "userId" to uid,
+                "displayName" to displayName.trim().take(50).ifBlank { "Strider" },
+                "heroLevel" to heroLevel.coerceIn(1L, 999L),
+                "message" to clean,
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+            db.collection("guilds").document(guildId)
+                .collection("messages").document(docId)
+                .set(payload)
+                .await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, path)
             Result.failure(e)
         }
     }

@@ -357,7 +357,9 @@ fun HeroShowcaseCard(
                             centerX = heroCenterX - 50.dp.toPx(),
                             groundY = groundY - 6.dp.toPx() + petBob,
                             petType = equippedPet.resolvedType(),
-                            scale = if (compact) 0.80f else 0.90f
+                            scale = if (compact) 0.80f else 0.90f,
+                            evolutionStage = equippedPet.resolvedStage(),
+                            evolutionBranch = equippedPet.resolvedBranch().name
                         )
                     }
 
@@ -457,28 +459,29 @@ fun HeroShowcaseCard(
                     ) {
                         Column(
                             modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
-                            GearSlotMiniLine("WPN", weapon)
-                            GearSlotMiniLine("ARM", armor)
-                            GearSlotMiniLine("HLM", helm)
+                            GearSlotMiniLine("WPN", ItemSlot.WEAPON, weapon)
+                            GearSlotMiniLine("ARM", ItemSlot.ARMOR, armor)
+                            GearSlotMiniLine("HLM", ItemSlot.HELM, helm)
                         }
                         Column(
                             modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
-                            GearSlotMiniLine("BTS", boots)
-                            GearSlotMiniLine("RNG", ring)
-                            GearSlotMiniLine("RLC", relic)
+                            GearSlotMiniLine("BTS", ItemSlot.BOOTS, boots)
+                            GearSlotMiniLine("RNG", ItemSlot.RING, ring)
+                            GearSlotMiniLine("RLC", ItemSlot.RELIC, relic)
                         }
                     }
                 }
             }
 
-            // Active Gear Set Resonance, Specialization, Wounds & Combat Perk Strip
+            // Active Gear Set Resonance, Specialization Tier, Wounds & Combat Perk Strip
             val activePerks = remember(stats) {
                 buildList {
                     if (stats.setBonus.activeTier != null) add(stats.setBonus.label)
+                    add("${stats.activeSpecialization.tierRoman}: ${stats.activeSpecialization.title}")
                     add("Ult: ${stats.activeSpecialization.ultimateName}")
                     if (stats.woundPenaltyPercent > 0) add("WOUNDED -${stats.woundPenaltyPercent}%")
                     if (stats.brokenGearCount > 0) add("${stats.brokenGearCount} SHATTERED GEAR")
@@ -550,7 +553,12 @@ fun HeroShowcaseCard(
 }
 
 @Composable
-private fun GearSlotMiniLine(prefix: String, item: InventoryItem?) {
+private fun GearSlotMiniLine(
+    prefix: String,
+    slot: ItemSlot,
+    item: InventoryItem?
+) {
+    val rarity = item?.resolvedRarity() ?: ItemRarity.COMMON
     val accent = gearAccentColor(item?.resolvedRarity())
     val runeTag = item?.resolvedRune()?.symbol?.let { " $it" } ?: ""
     val name = item?.let {
@@ -560,6 +568,14 @@ private fun GearSlotMiniLine(prefix: String, item: InventoryItem?) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        EquipmentArtworkBadge(
+            item = item,
+            slot = slot,
+            rarity = rarity,
+            affinity = item?.resolvedRune(),
+            upgradeLevel = item?.upgradeLevel ?: 0L,
+            size = 20.dp
+        )
         Surface(
             shape = RoundedCornerShape(4.dp),
             color = accent.copy(alpha = 0.22f),
@@ -808,7 +824,9 @@ fun AnimatedBattleStage(
                         centerX = heroBaseX - 50.dp.toPx() + (heroLunge.value * 16.dp.toPx()),
                         groundY = groundY - 4.dp.toPx() + sin(breathPhase + 1.2f) * 4.dp.toPx(),
                         petType = equippedPet.resolvedType(),
-                        scale = 0.85f
+                        scale = 0.85f,
+                        evolutionStage = equippedPet.resolvedStage(),
+                        evolutionBranch = equippedPet.resolvedBranch().name
                     )
                 }
 
@@ -1220,47 +1238,89 @@ internal fun DrawScope.drawHeroSprite(
         cap = StrokeCap.Round
     )
 
-    // Boots / Legs
+    // Armored Greaves & Winged Sabatons
     drawRoundRect(
         color = Color(0xFF1F2430),
-        topLeft = Offset(centerX - 11 * u, groundY - 26 * u),
-        size = Size(8 * u, 25 * u),
+        topLeft = Offset(centerX - 11.5f * u, groundY - 26 * u),
+        size = Size(8.5f * u, 25 * u),
         cornerRadius = CornerRadius(3 * u, 3 * u)
     )
     drawRoundRect(
         color = Color(0xFF1F2430),
         topLeft = Offset(centerX + 3 * u, groundY - 26 * u),
-        size = Size(8 * u, 25 * u),
+        size = Size(8.5f * u, 25 * u),
         cornerRadius = CornerRadius(3 * u, 3 * u)
     )
-    // Boot trims
-    drawLine(color = trimColor, start = Offset(centerX - 11 * u, groundY - 14 * u), end = Offset(centerX - 3 * u, groundY - 14 * u), strokeWidth = 2 * u)
-    drawLine(color = trimColor, start = Offset(centerX + 3 * u, groundY - 14 * u), end = Offset(centerX + 11 * u, groundY - 14 * u), strokeWidth = 2 * u)
-
-    // Torso / Tunic / Plate
+    // Greave knee plates & trim
     drawRoundRect(
         color = armorColor,
-        topLeft = Offset(centerX - 16 * u, groundY - 66 * u + bobY),
-        size = Size(32 * u, 42 * u),
-        cornerRadius = CornerRadius(8 * u, 8 * u)
+        topLeft = Offset(centerX - 11 * u, groundY - 22 * u),
+        size = Size(7.5f * u, 12 * u),
+        cornerRadius = CornerRadius(2.5f * u, 2.5f * u)
     )
-    // Inner vest & golden sash
     drawRoundRect(
-        color = cloakColor.copy(alpha = 0.85f),
-        topLeft = Offset(centerX - 10 * u, groundY - 58 * u + bobY),
-        size = Size(20 * u, 24 * u),
+        color = armorColor,
+        topLeft = Offset(centerX + 3.5f * u, groundY - 22 * u),
+        size = Size(7.5f * u, 12 * u),
+        cornerRadius = CornerRadius(2.5f * u, 2.5f * u)
+    )
+    drawLine(color = trimColor, start = Offset(centerX - 11 * u, groundY - 14 * u), end = Offset(centerX - 3.5f * u, groundY - 14 * u), strokeWidth = 2.2f * u)
+    drawLine(color = trimColor, start = Offset(centerX + 3.5f * u, groundY - 14 * u), end = Offset(centerX + 11 * u, groundY - 14 * u), strokeWidth = 2.2f * u)
+
+    // Sculpted Articulated Cuirass Armor & Tassets
+    val cuirassPath = Path().apply {
+        moveTo(centerX - 17 * u, groundY - 66 * u + bobY)
+        lineTo(centerX + 17 * u, groundY - 66 * u + bobY)
+        lineTo(centerX + 14 * u, groundY - 25 * u + bobY)
+        lineTo(centerX, groundY - 21 * u + bobY)
+        lineTo(centerX - 14 * u, groundY - 25 * u + bobY)
+        close()
+    }
+    drawPath(cuirassPath, color = armorColor)
+    drawPath(cuirassPath, color = trimColor, style = Stroke(width = 1.6f * u))
+
+    // Inner breastplate & bevelled V-chevrons
+    drawRoundRect(
+        color = cloakColor.copy(alpha = 0.88f),
+        topLeft = Offset(centerX - 10.5f * u, groundY - 59 * u + bobY),
+        size = Size(21 * u, 25 * u),
         cornerRadius = CornerRadius(4 * u, 4 * u)
+    )
+    drawLine(
+        color = trimColor.copy(alpha = 0.85f),
+        start = Offset(centerX - 10 * u, groundY - 56 * u + bobY),
+        end = Offset(centerX, groundY - 49 * u + bobY),
+        strokeWidth = 1.8f * u
+    )
+    drawLine(
+        color = trimColor.copy(alpha = 0.85f),
+        start = Offset(centerX + 10 * u, groundY - 56 * u + bobY),
+        end = Offset(centerX, groundY - 49 * u + bobY),
+        strokeWidth = 1.8f * u
+    )
+    // Glowing Elemental Chest Reactor Gem
+    drawCircle(
+        color = auraColor.copy(alpha = 0.45f * auraPulse),
+        radius = 7.5f * u,
+        center = Offset(centerX, groundY - 50 * u + bobY)
     )
     drawCircle(
         color = trimColor,
-        radius = 4.5f * u,
+        radius = 4.8f * u,
         center = Offset(centerX, groundY - 50 * u + bobY)
     )
-    // Shoulder Pauldrons
-    drawCircle(color = armorColor, radius = 8 * u, center = Offset(centerX - 16 * u, groundY - 60 * u + bobY))
-    drawCircle(color = armorColor, radius = 8 * u, center = Offset(centerX + 16 * u, groundY - 60 * u + bobY))
-    drawCircle(color = trimColor, radius = 8 * u, center = Offset(centerX - 16 * u, groundY - 60 * u + bobY), style = Stroke(width = 1.4f * u))
-    drawCircle(color = trimColor, radius = 8 * u, center = Offset(centerX + 16 * u, groundY - 60 * u + bobY), style = Stroke(width = 1.4f * u))
+    drawCircle(
+        color = Color.White,
+        radius = 1.8f * u,
+        center = Offset(centerX - 1 * u, groundY - 51 * u + bobY)
+    )
+    // Layered Winged Shoulder Pauldrons
+    drawCircle(color = armorColor, radius = 9.2f * u, center = Offset(centerX - 17 * u, groundY - 60 * u + bobY))
+    drawCircle(color = armorColor, radius = 9.2f * u, center = Offset(centerX + 17 * u, groundY - 60 * u + bobY))
+    drawCircle(color = trimColor, radius = 9.2f * u, center = Offset(centerX - 17 * u, groundY - 60 * u + bobY), style = Stroke(width = 1.8f * u))
+    drawCircle(color = trimColor, radius = 9.2f * u, center = Offset(centerX + 17 * u, groundY - 60 * u + bobY), style = Stroke(width = 1.8f * u))
+    drawCircle(color = trimColor, radius = 2.2f * u, center = Offset(centerX - 17 * u, groundY - 60 * u + bobY))
+    drawCircle(color = trimColor, radius = 2.2f * u, center = Offset(centerX + 17 * u, groundY - 60 * u + bobY))
 
     // Head with custom Skin Tone
     val headY = groundY - 82 * u + bobY
@@ -1442,63 +1502,173 @@ internal fun DrawScope.drawHeroSprite(
 
     when (heroClass) {
         HeroClass.VANGUARD -> {
-            // Sun-Forged Broadsword + Kite Shield
-            drawLine(color = weaponColor, start = hiltPos, end = tipPos, strokeWidth = 5.5f * u, cap = StrokeCap.Round)
+            // Sun-Forged Broadsword with Bevelled Blade, Fuller Groove, Winged Crossguard & Heraldic Kite Shield
+            val bladeVecX = tipPos.x - hiltPos.x
+            val bladeVecY = tipPos.y - hiltPos.y
+            val perpX = -bladeVecY * 0.11f
+            val perpY = bladeVecX * 0.11f
+            val swordPath = Path().apply {
+                moveTo(hiltPos.x + perpX, hiltPos.y + perpY)
+                lineTo(tipPos.x + perpX * 0.35f, tipPos.y + perpY * 0.35f)
+                lineTo(tipPos.x + bladeVecX * 0.12f, tipPos.y + bladeVecY * 0.12f)
+                lineTo(tipPos.x - perpX * 0.35f, tipPos.y - perpY * 0.35f)
+                lineTo(hiltPos.x - perpX, hiltPos.y - perpY)
+                close()
+            }
+            drawPath(swordPath, color = weaponColor)
+            drawPath(swordPath, color = Color.White.copy(alpha = 0.7f), style = Stroke(width = 1.1f * u))
+            // Glowing fuller groove
             drawLine(
                 color = trimColor,
-                start = Offset(hiltPos.x - 5 * u, hiltPos.y + 3 * u),
-                end = Offset(hiltPos.x + 5 * u, hiltPos.y - 3 * u),
-                strokeWidth = 3.5f * u,
+                start = hiltPos,
+                end = Offset(hiltPos.x + bladeVecX * 0.75f, hiltPos.y + bladeVecY * 0.75f),
+                strokeWidth = 1.8f * u,
                 cap = StrokeCap.Round
             )
-            drawRoundRect(
-                color = armorColor,
-                topLeft = Offset(centerX + 4 * u * dir - (if (facingRight) 0f else 12 * u), groundY - 56 * u + bobY),
-                size = Size(12 * u, 22 * u),
-                cornerRadius = CornerRadius(4 * u, 4 * u)
-            )
-            drawRoundRect(
+            // Winged Crossguard & Pommel Gem
+            drawLine(
                 color = trimColor,
-                topLeft = Offset(centerX + 4 * u * dir - (if (facingRight) 0f else 12 * u), groundY - 56 * u + bobY),
-                size = Size(12 * u, 22 * u),
-                cornerRadius = CornerRadius(4 * u, 4 * u),
-                style = Stroke(width = 1.8f * u)
+                start = Offset(hiltPos.x - 7 * u, hiltPos.y + 4 * u),
+                end = Offset(hiltPos.x + 7 * u, hiltPos.y - 4 * u),
+                strokeWidth = 4.2f * u,
+                cap = StrokeCap.Round
+            )
+            drawCircle(color = auraColor, radius = 2.6f * u, center = hiltPos)
+
+            // Heraldic Sun-Crest Shield
+            val shieldLeft = centerX + 3 * u * dir - (if (facingRight) 0f else 15 * u)
+            val shieldTop = groundY - 58 * u + bobY
+            val shieldPath = Path().apply {
+                moveTo(shieldLeft, shieldTop)
+                lineTo(shieldLeft + 15 * u, shieldTop)
+                lineTo(shieldLeft + 14 * u, shieldTop + 15 * u)
+                lineTo(shieldLeft + 7.5f * u, shieldTop + 25 * u)
+                lineTo(shieldLeft + 1 * u, shieldTop + 15 * u)
+                close()
+            }
+            drawPath(shieldPath, color = armorColor)
+            drawPath(shieldPath, color = trimColor, style = Stroke(width = 2.2f * u))
+            drawCircle(
+                color = trimColor,
+                radius = 3.5f * u,
+                center = Offset(shieldLeft + 7.5f * u, shieldTop + 11 * u)
             )
         }
         HeroClass.ARCANIST -> {
-            // Arcane Sun-Staff with glowing elemental crystal orb
-            drawLine(color = Color(0xFF92400E), start = Offset(hiltPos.x, hiltPos.y + 18 * u), end = tipPos, strokeWidth = 4 * u, cap = StrokeCap.Round)
-            drawCircle(color = auraColor.copy(alpha = 0.45f * auraPulse), radius = 11 * u, center = tipPos)
-            drawCircle(color = weaponColor, radius = 6 * u, center = tipPos)
+            // Celestial Archon Staff with Crescent Cradle, Floating Multifaceted Crystal & Orbiting Runes
+            val staffBottom = Offset(hiltPos.x - 4 * u * dir, hiltPos.y + 20 * u)
+            drawLine(color = Color(0xFF78350F), start = staffBottom, end = tipPos, strokeWidth = 4.4f * u, cap = StrokeCap.Round)
+            drawLine(color = trimColor, start = staffBottom, end = tipPos, strokeWidth = 1.4f * u, cap = StrokeCap.Round)
+            // Crescent cradle horns around tip
+            drawArc(
+                color = trimColor,
+                startAngle = 20f,
+                sweepAngle = 230f,
+                useCenter = false,
+                topLeft = Offset(tipPos.x - 10 * u, tipPos.y - 10 * u),
+                size = Size(20 * u, 20 * u),
+                style = Stroke(width = 2.8f * u, cap = StrokeCap.Round)
+            )
+            drawCircle(color = auraColor.copy(alpha = 0.48f * auraPulse), radius = 13 * u, center = tipPos)
+            val diamondOrb = Path().apply {
+                moveTo(tipPos.x, tipPos.y - 7.5f * u)
+                lineTo(tipPos.x + 6.5f * u, tipPos.y)
+                lineTo(tipPos.x, tipPos.y + 7.5f * u)
+                lineTo(tipPos.x - 6.5f * u, tipPos.y)
+                close()
+            }
+            drawPath(diamondOrb, color = weaponColor)
+            drawPath(diamondOrb, color = Color.White, style = Stroke(width = 1.2f * u))
             drawCircle(color = Color.White, radius = 2.4f * u, center = Offset(tipPos.x - 1.5f * u, tipPos.y - 1.5f * u))
         }
         HeroClass.RANGER -> {
-            // Curved Highland Bow + glowing arrow shaft
-            val bowRectLeft = centerX + (if (facingRight) 8 * u else -30 * u)
+            // Composite Recurve Greatbow with Metallic Riser, Bowstring & Nocked Broadhead Elemental Arrow
+            val bowRectLeft = centerX + (if (facingRight) 8 * u else -32 * u)
+            val bowTopY = groundY - 80 * u + bobY
             drawArc(
                 color = weaponColor,
-                startAngle = if (facingRight) -75f else 105f,
-                sweepAngle = 150f,
+                startAngle = if (facingRight) -78f else 102f,
+                sweepAngle = 156f,
                 useCenter = false,
-                topLeft = Offset(bowRectLeft, groundY - 78 * u + bobY),
-                size = Size(22 * u, 44 * u),
-                style = Stroke(width = 3.8f * u, cap = StrokeCap.Round)
+                topLeft = Offset(bowRectLeft, bowTopY),
+                size = Size(24 * u, 48 * u),
+                style = Stroke(width = 4.4f * u, cap = StrokeCap.Round)
             )
+            drawArc(
+                color = trimColor,
+                startAngle = if (facingRight) -40f else 140f,
+                sweepAngle = 80f,
+                useCenter = false,
+                topLeft = Offset(bowRectLeft, bowTopY),
+                size = Size(24 * u, 48 * u),
+                style = Stroke(width = 2.2f * u, cap = StrokeCap.Round)
+            )
+            // Bowstring
+            val stringX = centerX + 16 * u * dir
+            drawLine(
+                color = Color.White.copy(alpha = 0.75f),
+                start = Offset(stringX, bowTopY + 3 * u),
+                end = Offset(stringX, bowTopY + 45 * u),
+                strokeWidth = 1.3f * u
+            )
+            // Nocked Arrow + Glowing Broadhead Tip
+            val arrowStart = Offset(centerX + 10 * u * dir, groundY - 56 * u + bobY)
+            val arrowTip = Offset(centerX + (37 * u + swingAngleOffset * 0.45f) * dir, groundY - 56 * u + bobY)
             drawLine(
                 color = Color(0xFFFFF8E7),
-                start = Offset(centerX + 12 * u * dir, groundY - 56 * u + bobY),
-                end = Offset(centerX + (34 * u + swingAngleOffset * 0.4f) * dir, groundY - 56 * u + bobY),
-                strokeWidth = 2.2f * u,
+                start = arrowStart,
+                end = arrowTip,
+                strokeWidth = 2.4f * u,
                 cap = StrokeCap.Round
             )
+            val headPath = Path().apply {
+                moveTo(arrowTip.x + 5 * u * dir, arrowTip.y)
+                lineTo(arrowTip.x - 3 * u * dir, arrowTip.y - 4 * u)
+                lineTo(arrowTip.x - 1 * u * dir, arrowTip.y)
+                lineTo(arrowTip.x - 3 * u * dir, arrowTip.y + 4 * u)
+                close()
+            }
+            drawPath(headPath, color = weaponColor)
         }
         HeroClass.SHADOWBLADE -> {
-            // Twin Eclipse Daggers (front + offhand reverse grip)
-            val daggerTip = Offset(centerX + (33 * u + swingAngleOffset * 0.4f) * dir, groundY - 68 * u + bobY + swingAngleOffset * 0.6f)
-            drawLine(color = weaponColor, start = hiltPos, end = daggerTip, strokeWidth = 4.2f * u, cap = StrokeCap.Round)
+            // Twin Curved Eclipse Kris Daggers (Mainhand + Offhand Reverse Grip with Serrated Edge & Pommel Rings)
+            val daggerTip = Offset(centerX + (35 * u + swingAngleOffset * 0.45f) * dir, groundY - 70 * u + bobY + swingAngleOffset * 0.6f)
+            val mainBlade = Path().apply {
+                moveTo(hiltPos.x, hiltPos.y - 3 * u)
+                quadraticTo(
+                    (hiltPos.x + daggerTip.x) * 0.5f,
+                    hiltPos.y - 14 * u,
+                    daggerTip.x,
+                    daggerTip.y
+                )
+                quadraticTo(
+                    (hiltPos.x + daggerTip.x) * 0.55f,
+                    hiltPos.y - 4 * u,
+                    hiltPos.x,
+                    hiltPos.y + 3 * u
+                )
+                close()
+            }
+            drawPath(mainBlade, color = weaponColor)
+            drawPath(mainBlade, color = Color.White.copy(alpha = 0.75f), style = Stroke(width = 1.1f * u))
+            drawCircle(color = trimColor, radius = 3.2f * u, center = hiltPos, style = Stroke(width = 1.6f * u))
+
             val offHilt = Offset(centerX - 14 * u * dir, groundY - 46 * u + bobY)
-            val offTip = Offset(centerX - 28 * u * dir, groundY - 60 * u + bobY)
-            drawLine(color = weaponColor, start = offHilt, end = offTip, strokeWidth = 3.8f * u, cap = StrokeCap.Round)
+            val offTip = Offset(centerX - 31 * u * dir, groundY - 62 * u + bobY)
+            val offBlade = Path().apply {
+                moveTo(offHilt.x, offHilt.y - 2.5f * u)
+                quadraticTo(
+                    (offHilt.x + offTip.x) * 0.5f,
+                    offHilt.y - 12 * u,
+                    offTip.x,
+                    offTip.y
+                )
+                lineTo(offHilt.x, offHilt.y + 2.5f * u)
+                close()
+            }
+            drawPath(offBlade, color = weaponColor)
+            drawPath(offBlade, color = trimColor, style = Stroke(width = 1.0f * u))
+            drawCircle(color = trimColor, radius = 2.8f * u, center = offHilt, style = Stroke(width = 1.4f * u))
         }
     }
 
@@ -1521,47 +1691,152 @@ internal fun DrawScope.drawPetSprite(
     centerX: Float,
     groundY: Float,
     petType: PetType,
-    scale: Float
+    scale: Float,
+    evolutionStage: Int = 1,
+    evolutionBranch: String = "NONE"
 ) {
-    val u = 1.dp.toPx() * scale
-    val accent = petAccentColor(petType)
+    val stage = evolutionStage.coerceIn(1, 3)
+    val stageScale = when (stage) {
+        3 -> 1.24f
+        2 -> 1.12f
+        else -> 1.0f
+    }
+    val u = 1.dp.toPx() * scale * stageScale
+    val baseAccent = petAccentColor(petType)
+    val isVanguard = evolutionBranch.equals("VANGUARD", ignoreCase = true)
+    val isMystic = evolutionBranch.equals("MYSTIC", ignoreCase = true)
+    val auraColor = when {
+        stage >= 2 && isVanguard -> Color(0xFFF59E0B)
+        stage >= 2 && isMystic -> Color(0xFF38BDF8)
+        else -> baseAccent
+    }
+    val bodyTint = when {
+        stage == 3 && isVanguard -> Color(0xFFEA580C)
+        stage == 3 && isMystic -> Color(0xFF6366F1)
+        stage == 2 && isVanguard -> Color(0xFFD97706)
+        stage == 2 && isMystic -> Color(0xFF0EA5E9)
+        else -> baseAccent
+    }
 
     drawOval(
         color = Color(0x55000000),
-        topLeft = Offset(centerX - 12 * u, groundY - 2 * u),
-        size = Size(24 * u, 6 * u)
+        topLeft = Offset(centerX - 13 * u, groundY - 2 * u),
+        size = Size(26 * u, 6 * u)
     )
-    // Winged or grounded pet body
-    val isFlying = petType == PetType.DUNE_FALCON || petType == PetType.SOLAR_PHOENIX
-    val bodyY = if (isFlying) groundY - 34 * u else groundY - 14 * u
 
+    val isFlying = petType == PetType.DUNE_FALCON || petType == PetType.SOLAR_PHOENIX || stage == 3
+    val bodyY = if (isFlying) groundY - 34 * u else groundY - 15 * u
+
+    // Stage 2 & Stage 3 Radiant Evolution Aura
+    if (stage >= 2) {
+        val auraRadius = if (stage == 3) 26 * u else 19 * u
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(auraColor.copy(alpha = if (stage == 3) 0.55f else 0.35f), Color.Transparent),
+                center = Offset(centerX, bodyY),
+                radius = auraRadius
+            ),
+            radius = auraRadius,
+            center = Offset(centerX, bodyY)
+        )
+    }
+
+    // Wings for flying pets OR Stage 3 Apex Mythic forms
     if (isFlying) {
+        val wingSpan = if (stage == 3) 24 * u else 18 * u
+        val wingHeight = if (stage == 3) 14 * u else 10 * u
+        val wingColor = if (stage == 3) auraColor else baseAccent.copy(alpha = 0.88f)
         val wingLeft = Path().apply {
             moveTo(centerX, bodyY)
-            lineTo(centerX - 18 * u, bodyY - 10 * u)
-            lineTo(centerX - 10 * u, bodyY + 4 * u)
+            lineTo(centerX - wingSpan, bodyY - wingHeight)
+            lineTo(centerX - wingSpan * 0.55f, bodyY + 5 * u)
             close()
         }
         val wingRight = Path().apply {
             moveTo(centerX, bodyY)
-            lineTo(centerX + 18 * u, bodyY - 10 * u)
-            lineTo(centerX + 10 * u, bodyY + 4 * u)
+            lineTo(centerX + wingSpan, bodyY - wingHeight)
+            lineTo(centerX + wingSpan * 0.55f, bodyY + 5 * u)
             close()
         }
-        drawPath(wingLeft, color = accent.copy(alpha = 0.85f))
-        drawPath(wingRight, color = accent.copy(alpha = 0.85f))
+        drawPath(wingLeft, color = wingColor)
+        drawPath(wingRight, color = wingColor)
     }
 
+    // Tail / Armored Plume for grounded or evolved beasts
+    if (stage >= 2) {
+        val tailPath = Path().apply {
+            moveTo(centerX - 8 * u, bodyY + 3 * u)
+            lineTo(centerX - 20 * u, bodyY - 4 * u)
+            lineTo(centerX - 14 * u, bodyY + 7 * u)
+            close()
+        }
+        drawPath(tailPath, color = auraColor.copy(alpha = 0.9f))
+    }
+
+    // Core Pet Body
     drawCircle(
-        color = accent,
-        radius = 10 * u,
+        color = bodyTint,
+        radius = 10.5f * u,
         center = Offset(centerX, bodyY)
     )
-    // Ears / Crest
+    // Inner armored/mystic chest crest
+    if (stage >= 2) {
+        drawCircle(
+            color = if (isVanguard) Color(0xFFFFD166) else Color(0xFFE0F2FE),
+            radius = 4.2f * u,
+            center = Offset(centerX + 2 * u, bodyY + 2 * u)
+        )
+    }
+
+    // Ears / Horns / Stage 3 Mythic Crown
+    val leftEar = Path().apply {
+        moveTo(centerX - 6 * u, bodyY - 7 * u)
+        lineTo(centerX - 10 * u, bodyY - 15 * u)
+        lineTo(centerX - 1 * u, bodyY - 9 * u)
+        close()
+    }
+    val rightEar = Path().apply {
+        moveTo(centerX + 6 * u, bodyY - 7 * u)
+        lineTo(centerX + 10 * u, bodyY - 15 * u)
+        lineTo(centerX + 1 * u, bodyY - 9 * u)
+        close()
+    }
+    drawPath(leftEar, color = bodyTint)
+    drawPath(rightEar, color = bodyTint)
+
+    if (stage == 3) {
+        // Floating Apex Crown + Orbiting Elemental Sigils
+        val crown = Path().apply {
+            moveTo(centerX - 7 * u, bodyY - 14 * u)
+            lineTo(centerX - 4 * u, bodyY - 21 * u)
+            lineTo(centerX, bodyY - 16 * u)
+            lineTo(centerX + 4 * u, bodyY - 21 * u)
+            lineTo(centerX + 7 * u, bodyY - 14 * u)
+            close()
+        }
+        drawPath(crown, color = Color(0xFFFFD166))
+        drawCircle(color = auraColor, radius = 2.6f * u, center = Offset(centerX - 16 * u, bodyY - 12 * u))
+        drawCircle(color = Color(0xFFFFF8E7), radius = 2.6f * u, center = Offset(centerX + 16 * u, bodyY - 12 * u))
+    } else if (stage == 2) {
+        // Stage 2 Halo Ring
+        drawCircle(
+            color = auraColor.copy(alpha = 0.85f),
+            radius = 12.5f * u,
+            center = Offset(centerX, bodyY),
+            style = Stroke(width = 1.6f * u)
+        )
+    }
+
+    // Bright Expressive Eyes
     drawCircle(
         color = Color(0xFFFFF8E7),
-        radius = 2.2f * u,
+        radius = 2.4f * u,
         center = Offset(centerX + 4 * u, bodyY - 2 * u)
+    )
+    drawCircle(
+        color = Color(0xFF0F172A),
+        radius = 1.1f * u,
+        center = Offset(centerX + 4.8f * u, bodyY - 2 * u)
     )
 }
 

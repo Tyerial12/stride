@@ -28,6 +28,62 @@ enum class ActiveSkillEffect {
     NIGHTFALL_EXECUTION  // Devastating finisher dealing +40% bonus vs debuffed foes
 }
 
+enum class SkillMasteryTier(
+    val tierNumber: Int,
+    val roman: String,
+    val title: String,
+    val minRank: Int,
+    val maxRank: Int,
+    val requiredHeroLevelBonus: Int,
+    val milestoneBonusSummary: String
+) {
+    TIER_1_NOVICE(
+        tierNumber = 1,
+        roman = "Tier I",
+        title = "Initiate Art",
+        minRank = 1,
+        maxRank = 3,
+        requiredHeroLevelBonus = 0,
+        milestoneBonusSummary = "Base Combat Art & Passive Foundation"
+    ),
+    TIER_2_ADEPT(
+        tierNumber = 2,
+        roman = "Tier II",
+        title = "Adept Mastery",
+        minRank = 4,
+        maxRank = 6,
+        requiredHeroLevelBonus = 3,
+        milestoneBonusSummary = "Awakens Tier II Adept Synergy (+12% Skill Power & -2 Valor Cost)"
+    ),
+    TIER_3_MASTER(
+        tierNumber = 3,
+        roman = "Tier III",
+        title = "Grandmaster Art",
+        minRank = 7,
+        maxRank = 9,
+        requiredHeroLevelBonus = 7,
+        milestoneBonusSummary = "Awakens Tier III Grandmaster Overdrive (+25% Skill Power & +10% Crit/Status)"
+    ),
+    TIER_4_MYTHIC(
+        tierNumber = 4,
+        roman = "Tier IV",
+        title = "Mythic Transcendence",
+        minRank = 10,
+        maxRank = 10,
+        requiredHeroLevelBonus = 11,
+        milestoneBonusSummary = "Awakens Tier IV Mythic Apex Form (+45% Skill Power & -1T Cooldown)"
+    );
+
+    companion object {
+        fun forRank(rank: Int): SkillMasteryTier = when {
+            rank >= 10 -> TIER_4_MYTHIC
+            rank >= 7 -> TIER_3_MASTER
+            rank >= 4 -> TIER_2_ADEPT
+            else -> TIER_1_NOVICE
+        }
+    }
+}
+
 data class ClassSkillSpec(
     val index: Int, // 0..2 = Active, 3..8 = Passive
     val id: String,
@@ -35,7 +91,7 @@ data class ClassSkillSpec(
     val kind: ClassSkillKind,
     val name: String,
     val unlockLevel: Int,
-    val maxRank: Int = 5,
+    val maxRank: Int = 10,
     val valorCost: Int = 0,
     val cooldownTurns: Int = 0,
     val activeEffect: ActiveSkillEffect? = null,
@@ -44,39 +100,89 @@ data class ClassSkillSpec(
     val summary: String,
     val perRankSummary: String
 ) {
+    val skillBranchTier: Int
+        get() = when {
+            unlockLevel <= 3 -> 1
+            unlockLevel <= 9 -> 2
+            unlockLevel <= 14 -> 3
+            else -> 4
+        }
+
+    val skillBranchTierLabel: String
+        get() = when (skillBranchTier) {
+            1 -> "Tier I • Foundation"
+            2 -> "Tier II • Vanguard Art"
+            3 -> "Tier III • Ascendant Art"
+            else -> "Tier IV • Apex Art"
+        }
+
     fun isUnlockedAt(heroLevel: Int): Boolean = heroLevel >= unlockLevel
+
+    fun masteryTierForRank(rank: Int): SkillMasteryTier =
+        SkillMasteryTier.forRank(rank.coerceAtLeast(1))
+
+    fun evolvedNameForRank(rank: Int): String {
+        return when (masteryTierForRank(rank)) {
+            SkillMasteryTier.TIER_1_NOVICE -> name
+            SkillMasteryTier.TIER_2_ADEPT -> "Adept $name"
+            SkillMasteryTier.TIER_3_MASTER -> "Grandmaster $name"
+            SkillMasteryTier.TIER_4_MYTHIC -> "Mythic $name ★"
+        }
+    }
+
+    fun effectiveValorCost(rank: Int): Int {
+        if (valorCost <= 0) return 0
+        val reduction = when {
+            rank >= 10 -> 5
+            rank >= 7 -> 3
+            rank >= 4 -> 2
+            else -> 0
+        }
+        return (valorCost - reduction).coerceAtLeast(10)
+    }
+
+    fun effectiveCooldownTurns(rank: Int): Int {
+        if (cooldownTurns <= 0) return 0
+        return if (rank >= 10) (cooldownTurns - 1).coerceAtLeast(1) else cooldownTurns
+    }
 
     fun effectiveMultiplier(rank: Int): Float {
         val safeRank = rank.coerceIn(1, maxRank)
-        return (basePowerPct + (safeRank - 1) * perRankPowerPct) / 100f
+        val tierMilestonePct = when {
+            safeRank >= 10 -> 45
+            safeRank >= 7 -> 25
+            safeRank >= 4 -> 12
+            else -> 0
+        }
+        return (basePowerPct + (safeRank - 1) * perRankPowerPct + tierMilestonePct) / 100f
     }
 }
 
 /**
- * 36-skill class mastery catalog (4 Classes × 9 Skills: 3 Active Combat Skills + 6 Passives).
- * Skills unlock automatically as the hero levels up, and ranks 1..5 are upgraded using Sol Coins
- * on a smooth, long-term balanced curve (10 -> 15 -> 35 -> 70 -> 130 Sol Coins).
+ * 36-skill Multi-Tier Class Mastery Catalog (4 Classes × 9 Skills across 4 Unlock Tiers, each upgradable across 4 Mastery Tiers up to Rank 10).
+ * Skills unlock automatically as the hero levels up, and ranks 1..10 are upgraded using Sol Coins
+ * on a smooth, long-term balanced curve.
  */
 object ClassSkillCatalog {
 
     const val TOTAL_SKILLS_PER_CLASS = 9
     const val ACTIVE_SKILL_COUNT = 3
-    const val MAX_SKILL_RANK = 5
+    const val MAX_SKILL_RANK = 10
 
     /**
-     * Smooth escalating Sol Coin cost per rank-up:
-     * Rank 0 -> 1: 10 Sol Coins (Lv.1 starter active begins at Rank 1 free!)
-     * Rank 1 -> 2: 15 Sol Coins
-     * Rank 2 -> 3: 35 Sol Coins
-     * Rank 3 -> 4: 70 Sol Coins
-     * Rank 4 -> 5: 130 Sol Coins
+     * Smooth escalating Sol Coin cost per rank-up across 4 Mastery Tiers (Ranks 1..10):
      */
     fun upgradeSolCoinCost(currentRank: Int): Long = when (currentRank.coerceIn(0, MAX_SKILL_RANK - 1)) {
         0 -> 10L
         1 -> 15L
-        2 -> 35L
-        3 -> 70L
-        else -> 130L
+        2 -> 25L
+        3 -> 40L // Tier II Adept Awakening
+        4 -> 60L
+        5 -> 85L
+        6 -> 115L // Tier III Grandmaster Awakening
+        7 -> 150L
+        8 -> 195L
+        else -> 250L // Tier IV Mythic Transcendence (Rank 10)
     }
 
     private val vanguardSkills = listOf(

@@ -39,7 +39,8 @@ data class WatchSleepSnapshot(
     val sleepSourceLabel: String = "",
     val latestCompletedEndMs: Long = 0L,
     val latestCompletedDurationMinutes: Long = 0L,
-    val sleepPermissionGranted: Boolean = false
+    val sleepPermissionGranted: Boolean = false,
+    val hasWatchSleepDetected: Boolean = false
 )
 
 data class HealthConnectSyncStatus(
@@ -580,11 +581,21 @@ class HealthConnectStepReader(
      * Reads real smartwatch sleep sessions from Health Connect (SleepSessionRecord) and combines
      * them with any live Wear OS watch sleep status signal so the Hero automatically enters
      * Sleeping Mode when real-life watch sleep is detected and wakes up Well-Rested afterward.
+     *
+     * When [watchConnected] is false (watch disconnected), active sleep and live watch sleep
+     * detection are immediately cleared so the UI and Dual-Pool Stamina economy switch to
+     * step-fueled Stamina mode right away.
      */
-    suspend fun readWatchSleepSnapshot(): WatchSleepSnapshot {
+    suspend fun readWatchSleepSnapshot(watchConnected: Boolean = true): WatchSleepSnapshot {
         val (liveWearSleeping, liveWearSinceMs, liveWearSource) = preferences.readWatchLiveSleepTriple()
+        if (!watchConnected && liveWearSleeping) {
+            preferences.setWatchLiveSleeping(false)
+        }
         val nowMs = System.currentTimeMillis()
-        val liveWearActive = liveWearSleeping && liveWearSinceMs > 0L && (nowMs - liveWearSinceMs) < 16L * 3600_000L
+        val liveWearActive = watchConnected &&
+            liveWearSleeping &&
+            liveWearSinceMs > 0L &&
+            (nowMs - liveWearSinceMs) < 16L * 3600_000L
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return WatchSleepSnapshot(
@@ -592,14 +603,22 @@ class HealthConnectStepReader(
                 activeSleepMinutes = if (liveWearActive) ((nowMs - liveWearSinceMs) / 60_000L).coerceAtLeast(1L) else 0L,
                 activeSessionMarkerMs = if (liveWearActive) liveWearSinceMs else 0L,
                 sleepSourceLabel = if (liveWearActive) liveWearSource else "",
-                sleepPermissionGranted = false
+                sleepPermissionGranted = false,
+                hasWatchSleepDetected = liveWearActive
             )
         }
-        return readWatchSleepSnapshotApi26(liveWearActive, liveWearSinceMs, liveWearSource, nowMs)
+        return readWatchSleepSnapshotApi26(
+            watchConnected = watchConnected,
+            liveWearActive = liveWearActive,
+            liveWearSinceMs = liveWearSinceMs,
+            liveWearSource = liveWearSource,
+            nowMs = nowMs
+        )
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
     private suspend fun readWatchSleepSnapshotApi26(
+        watchConnected: Boolean,
         liveWearActive: Boolean,
         liveWearSinceMs: Long,
         liveWearSource: String,
@@ -613,7 +632,8 @@ class HealthConnectStepReader(
                     activeSleepMinutes = if (liveWearActive) ((nowMs - liveWearSinceMs) / 60_000L).coerceAtLeast(1L) else 0L,
                     activeSessionMarkerMs = if (liveWearActive) liveWearSinceMs else 0L,
                     sleepSourceLabel = if (liveWearActive) liveWearSource else "",
-                    sleepPermissionGranted = false
+                    sleepPermissionGranted = false,
+                    hasWatchSleepDetected = liveWearActive
                 )
             }
             val client = HealthConnectClient.getOrCreate(appContext)
@@ -628,12 +648,13 @@ class HealthConnectStepReader(
                     activeSleepMinutes = if (liveWearActive) ((nowMs - liveWearSinceMs) / 60_000L).coerceAtLeast(1L) else 0L,
                     activeSessionMarkerMs = if (liveWearActive) liveWearSinceMs else 0L,
                     sleepSourceLabel = if (liveWearActive) liveWearSource else "",
-                    sleepPermissionGranted = false
+                    sleepPermissionGranted = false,
+                    hasWatchSleepDetected = liveWearActive
                 )
             }
 
             val endInstant = Instant.now()
-            val startInstant = endInstant.minusSeconds(LOOKBACK_SECONDS)
+            val startInstant = endInstant.minusSeconds(SLEEP_LOOKBACK_SECONDS)
             val response = client.readRecords(
                 ReadRecordsRequest(
                     recordType = SleepSessionRecord::class,
@@ -656,7 +677,8 @@ class HealthConnectStepReader(
                     activeSleepMinutes = if (liveWearActive) ((nowMs - liveWearSinceMs) / 60_000L).coerceAtLeast(1L) else 0L,
                     activeSessionMarkerMs = if (liveWearActive) liveWearSinceMs else 0L,
                     sleepSourceLabel = if (liveWearActive) liveWearSource else "",
-                    sleepPermissionGranted = true
+                    sleepPermissionGranted = true,
+                    hasWatchSleepDetected = liveWearActive
                 )
             }
 
@@ -668,9 +690,9 @@ class HealthConnectStepReader(
                 latest.metadata.device?.type
             )
 
-            // Active if Health Connect reports a sleep session covering "now" or ending within the last 12 minutes
-            val hcActiveNow = sessionEndMs >= (nowMs - 12L * 60_000L)
-            val isSleeping = liveWearActive || hcActiveNow
+            // Active ONLY if the watch is currently connected AND Health Connect reports a sleep session covering "now"
+            val hcActiveNow = watchConnected && sessionEndMs >= (nowMs - 12L * 60_000L)
+            val isSleeping = watchConnected && (liveWearActive || hcActiveNow)
             val activeDuration = when {
                 liveWearActive -> ((nowMs - liveWearSinceMs) / 60_000L).coerceAtLeast(durationMin)
                 hcActiveNow -> durationMin
@@ -685,7 +707,8 @@ class HealthConnectStepReader(
                 sleepSourceLabel = if (liveWearActive) liveWearSource else sourceLabel,
                 latestCompletedEndMs = if (!hcActiveNow && durationMin >= 10L) sessionEndMs else 0L,
                 latestCompletedDurationMinutes = if (!hcActiveNow && durationMin >= 10L) durationMin else 0L,
-                sleepPermissionGranted = true
+                sleepPermissionGranted = true,
+                hasWatchSleepDetected = watchConnected
             )
         } catch (e: CancellationException) {
             throw e
@@ -696,7 +719,8 @@ class HealthConnectStepReader(
                 activeSleepMinutes = if (liveWearActive) ((nowMs - liveWearSinceMs) / 60_000L).coerceAtLeast(1L) else 0L,
                 activeSessionMarkerMs = if (liveWearActive) liveWearSinceMs else 0L,
                 sleepSourceLabel = if (liveWearActive) liveWearSource else "",
-                sleepPermissionGranted = _status.value.sleepPermissionGranted
+                sleepPermissionGranted = _status.value.sleepPermissionGranted,
+                hasWatchSleepDetected = liveWearActive
             )
         }
     }
@@ -707,6 +731,7 @@ class HealthConnectStepReader(
         const val SAMSUNG_HEALTH_PACKAGE = "com.sec.android.app.shealth"
         const val GALAXY_WEARABLE_PACKAGE = "com.samsung.android.app.watchmanager"
         private const val LOOKBACK_SECONDS = 24L * 60L * 60L
+        private const val SLEEP_LOOKBACK_SECONDS = 7L * 24L * 60L * 60L
         private const val WATERMARK_RETENTION_MS = 36L * 60L * 60L * 1000L
         private const val MAX_WATERMARK_ENTRIES = 250
         private const val MAX_PAGES = 10

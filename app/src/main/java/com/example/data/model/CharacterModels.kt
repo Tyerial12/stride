@@ -149,6 +149,8 @@ data class TownPresencePlayer(
     val avatarConfig: String = HeroAvatarConfig.DEFAULT_RAW,
     val equippedPetId: String = "",
     val equippedPetLevel: Long = 1L,
+    val equippedPetStage: Long = 1L,
+    val equippedPetBranch: String = PetEvolutionBranch.NONE.id,
     val posX: Double = 0.50,
     val posY: Double = 0.58,
     val facingRight: Boolean = true,
@@ -159,6 +161,8 @@ data class TownPresencePlayer(
     fun resolvedClass(): HeroClass = HeroClass.fromRaw(heroClass)
     fun resolvedAvatar(): HeroAvatarConfig = HeroAvatarConfig.parse(avatarConfig)
     fun resolvedPetType(): PetType? = PetType.entries.firstOrNull { it.name == equippedPetId }
+    fun resolvedPetStage(): Int = equippedPetStage.toInt().coerceIn(1, 3)
+    fun resolvedPetBranch(): PetEvolutionBranch = PetEvolutionBranch.fromRaw(equippedPetBranch)
 }
 
 enum class TownNpcRole(
@@ -210,10 +214,19 @@ enum class TownNpcRole(
         id = "npc_blacksmith",
         npcName = "Torin • Blacksmith",
         title = "Blacksmith",
-        greeting = "The Sun-Forge burns hot! Bring me Sunsteel Ore, Elemental Essence, and Starforged Ingots to craft and temper your gear.",
+        greeting = "The Sun-Forge burns hot! Strike the molten anvil with timing to forge Masterwork gear and upgrade the Sun-Forge.",
         posX = 0.80f,
         posY = 0.78f,
         badgeColorHex = 0xFFE11D48L
+    ),
+    ALCHEMIST_SPIRE(
+        id = "npc_alchemist",
+        npcName = "Sable • Alchemist Spire",
+        title = "Alchemist Spire",
+        greeting = "Balance the cauldron flame to brew Potent & Double Elixirs, cure Battle Wounds, and upgrade the Alchemist Spire!",
+        posX = 0.50f,
+        posY = 0.28f,
+        badgeColorHex = 0xFF10B981L
     )
 }
 
@@ -229,6 +242,8 @@ data class TownMaterialOffer(
     val starforgedIngotGrant: Long = 0L,
     val fogLanternGrant: Int = 0,
     val randomRuneGrant: Boolean = false,
+    val guildCrestGrant: Long = 0L,
+    val relicPieceGrant: Boolean = false,
     val tagLabel: String
 )
 
@@ -288,6 +303,24 @@ object TownMerchantCatalog {
             essenceGrant = 6L,
             randomRuneGrant = true,
             tagLabel = "RUNE"
+        ),
+        TownMaterialOffer(
+            id = "mat_relic_coffer",
+            title = "Ancient Relic Set Coffer",
+            subtitle = "Unlocks +1 uncollected Relic Set piece toward 2pc/4pc permanent Hero bonuses",
+            solCoinCost = 30L,
+            dailyStockLimit = 1,
+            relicPieceGrant = true,
+            tagLabel = "RELIC SET"
+        ),
+        TownMaterialOffer(
+            id = "mat_guild_crest",
+            title = "Guild Charter Crest",
+            subtitle = "Town-exclusive Royal Charter required to found your own Step-Powered Guild",
+            solCoinCost = 40L,
+            dailyStockLimit = 1,
+            guildCrestGrant = 1L,
+            tagLabel = "GUILD"
         )
     )
 }

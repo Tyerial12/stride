@@ -1,10 +1,12 @@
 package com.example.data.model
 
+import androidx.annotation.Keep
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.ServerTimestamp
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 enum class PetRarity(
     val label: String,
@@ -154,6 +156,7 @@ data class ComputedPetBonus(
     val summaryText: String = "No companion equipped"
 )
 
+@Keep
 @IgnoreExtraProperties
 data class OwnedPet(
     @DocumentId val id: String = "",
@@ -164,15 +167,65 @@ data class OwnedPet(
     val xpToNextLevel: Long = 60L,
     val equippedWeaponId: String = "",
     val equippedArmorId: String = "",
+    val evolutionStage: Long = 1L,
+    val evolutionBranch: String = PetEvolutionBranch.NONE.id,
+    val bondXp: Long = 0L,
+    val stepsWalkedWithPet: Long = 0L,
+    val lastCareDateKey: String = "",
+    val dailyCareActions: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
     fun resolvedType(): PetType =
         PetType.entries.firstOrNull { it.name == petType } ?: PetType.SUNFOX_KIT
+
+    fun resolvedStage(): Int = evolutionStage.toInt().coerceIn(1, 3)
+
+    fun resolvedBranch(): PetEvolutionBranch = PetEvolutionBranch.fromRaw(evolutionBranch)
+
+    fun resolvedForm(): PetEvolutionFormSpec =
+        PetEvolutionCatalog.resolveForm(resolvedType(), resolvedStage(), resolvedBranch())
 }
+
+data class PetEvolutionCatalystOffer(
+    val id: String,
+    val name: String,
+    val description: String,
+    val coinCost: Long,
+    val requiredMenagerieLevel: Int,
+    val grantsEvolutionShards: Long = 0L,
+    val grantsMythicCores: Long = 0L
+)
 
 object PetCatalog {
     const val MAX_PET_LEVEL = 50L
+
+    val catalystShop: List<PetEvolutionCatalystOffer> = listOf(
+        PetEvolutionCatalystOffer(
+            id = "cat_evolution_shard",
+            name = "Sunstone Evolution Shard",
+            description = "Rare solar crystal for Stage 2 & Stage 3 Pet Evolution (8 needed for Stage 2, 12 for Stage 3).",
+            coinCost = 35L,
+            requiredMenagerieLevel = 2,
+            grantsEvolutionShards = 1L
+        ),
+        PetEvolutionCatalystOffer(
+            id = "cat_evolution_bundle",
+            name = "Awakening Catalyst Trio (x3)",
+            description = "Merchant crate of 3 Evolution Shards reserved for seasoned Menagerie patrons.",
+            coinCost = 95L,
+            requiredMenagerieLevel = 3,
+            grantsEvolutionShards = 3L
+        ),
+        PetEvolutionCatalystOffer(
+            id = "cat_mythic_core",
+            name = "Mythic Apex Core",
+            description = "Endgame celestial core for Stage 3 Apex Mythic Ascension (5 needed per pet).",
+            coinCost = 120L,
+            requiredMenagerieLevel = 4,
+            grantsMythicCores = 1L
+        )
+    )
 
     val foodShop: List<PetFoodSpec> = listOf(
         PetFoodSpec(
@@ -340,7 +393,7 @@ object PetCatalog {
         }
     }
 
-    fun xpRequiredForLevel(level: Long): Long = 60L + (level - 1L).coerceAtLeast(0L) * 40L
+    fun xpRequiredForLevel(level: Long): Long = 85L + (level - 1L).coerceAtLeast(0L) * 65L
 
     fun applyFoodXp(pet: OwnedPet, xpGain: Long): OwnedPet {
         var lvl = pet.level.coerceIn(1L, MAX_PET_LEVEL)
@@ -367,89 +420,100 @@ object PetCatalog {
         if (pet == null) return ComputedPetBonus()
         val type = pet.resolvedType()
         val lvl = pet.level.toInt().coerceIn(1, MAX_PET_LEVEL.toInt())
+        val form = pet.resolvedForm()
+        val evoMult = form.statScaleMultiplier
+        val branch = pet.resolvedBranch()
+        val stageTag = if (form.stage > 1) " [S${form.stage} ${branch.label}]" else ""
         val weapon = weaponById(pet.equippedWeaponId)
         val armor = armorById(pet.equippedArmorId)
 
         val gearAtk = (weapon?.attackBonus ?: 0) + (armor?.attackBonus ?: 0)
         val gearDef = (weapon?.defenseBonus ?: 0) + (armor?.defenseBonus ?: 0)
         val gearHp = (weapon?.hpBonus ?: 0) + (armor?.hpBonus ?: 0)
+        val branchAtkExtra = if (form.stage >= 2 && branch == PetEvolutionBranch.VANGUARD) form.stage * 5 else 0
+        val branchDefExtra = if (form.stage >= 2 && branch == PetEvolutionBranch.MYSTIC) form.stage * 4 else 0
+        val branchEnergyExtra = if (form.stage >= 2 && branch == PetEvolutionBranch.MYSTIC) form.stage * 8 else 0
 
         return when (type) {
             PetType.SUNFOX_KIT -> {
-                val shardPct = 10 + lvl * 3
-                val flatAtk = 2 + lvl + gearAtk
+                val shardPct = ((10 + lvl * 3) * evoMult).roundToInt()
+                val flatAtk = ((2 + lvl) * evoMult).roundToInt() + gearAtk + branchAtkExtra
                 ComputedPetBonus(
                     flatAttack = flatAtk,
-                    flatDefense = gearDef,
+                    flatDefense = gearDef + branchDefExtra,
                     flatMaxHp = gearHp,
+                    flatMaxEnergy = branchEnergyExtra,
                     sunshardMultiplier = 1.0f + (shardPct / 100f),
-                    summaryText = "+$shardPct% Sunshards · +$flatAtk ATK"
+                    summaryText = "+$shardPct% Sunshards · +$flatAtk ATK$stageTag"
                 )
             }
             PetType.AEGIS_SCARAB -> {
-                val defPct = 8 + lvl * 2
-                val flatDef = 4 + (lvl * 2) + gearDef
-                val flatHp = 10 + (lvl * 4) + gearHp
+                val defPct = ((8 + lvl * 2) * evoMult).roundToInt()
+                val flatDef = ((4 + lvl * 2) * evoMult).roundToInt() + gearDef + branchDefExtra
+                val flatHp = ((10 + lvl * 4) * evoMult).roundToInt() + gearHp
                 ComputedPetBonus(
-                    flatAttack = gearAtk,
+                    flatAttack = gearAtk + branchAtkExtra,
                     flatDefense = flatDef,
                     flatMaxHp = flatHp,
+                    flatMaxEnergy = branchEnergyExtra,
                     defenseMultiplier = 1.0f + (defPct / 100f),
-                    summaryText = "+$defPct% DEF · +$flatDef DEF · +$flatHp HP"
+                    summaryText = "+$defPct% DEF · +$flatDef DEF · +$flatHp HP$stageTag"
                 )
             }
             PetType.DUNE_FALCON -> {
-                val stepPct = 12 + lvl * 3
-                val flatEnergy = 10 + (lvl * 3)
+                val stepPct = ((12 + lvl * 3) * evoMult).roundToInt()
+                val flatEnergy = ((10 + lvl * 3) * evoMult).roundToInt() + branchEnergyExtra
                 ComputedPetBonus(
-                    flatAttack = 2 + gearAtk,
-                    flatDefense = gearDef,
+                    flatAttack = (2 * evoMult).roundToInt() + gearAtk + branchAtkExtra,
+                    flatDefense = gearDef + branchDefExtra,
                     flatMaxHp = gearHp,
                     flatMaxEnergy = flatEnergy,
                     stepEnergyMultiplier = 1.0f + (stepPct / 100f),
-                    summaryText = "+$stepPct% Step Energy · +$flatEnergy Max EN"
+                    summaryText = "+$stepPct% Step Energy · +$flatEnergy Max EN$stageTag"
                 )
             }
             PetType.CINDER_LYNX -> {
-                val atkPct = 10 + lvl * 2
-                val flatAtk = 6 + (lvl * 3) + gearAtk
+                val atkPct = ((10 + lvl * 2) * evoMult).roundToInt()
+                val flatAtk = ((6 + lvl * 3) * evoMult).roundToInt() + gearAtk + branchAtkExtra
                 ComputedPetBonus(
                     flatAttack = flatAtk,
-                    flatDefense = gearDef,
+                    flatDefense = gearDef + branchDefExtra,
                     flatMaxHp = gearHp,
+                    flatMaxEnergy = branchEnergyExtra,
                     attackMultiplier = 1.0f + (atkPct / 100f),
-                    summaryText = "+$atkPct% ATK · +$flatAtk ATK"
+                    summaryText = "+$atkPct% ATK · +$flatAtk ATK$stageTag"
                 )
             }
             PetType.OASIS_TORTOISE -> {
-                val hpPct = 12 + lvl * 3
-                val flatHp = 22 + (lvl * 8) + gearHp
-                val flatDef = 3 + lvl + gearDef
+                val hpPct = ((12 + lvl * 3) * evoMult).roundToInt()
+                val flatHp = ((22 + lvl * 8) * evoMult).roundToInt() + gearHp
+                val flatDef = ((3 + lvl) * evoMult).roundToInt() + gearDef + branchDefExtra
                 ComputedPetBonus(
-                    flatAttack = gearAtk,
+                    flatAttack = gearAtk + branchAtkExtra,
                     flatDefense = flatDef,
                     flatMaxHp = flatHp,
+                    flatMaxEnergy = branchEnergyExtra,
                     maxHpMultiplier = 1.0f + (hpPct / 100f),
-                    summaryText = "+$hpPct% Max HP · +$flatHp HP · +$flatDef DEF"
+                    summaryText = "+$hpPct% Max HP · +$flatHp HP · +$flatDef DEF$stageTag"
                 )
             }
             PetType.SOLAR_PHOENIX -> {
-                val allPct = 10 + lvl * 2
-                val xpPct = 12 + lvl * 3
-                val flatAtk = 8 + (lvl * 3) + gearAtk
-                val flatDef = 6 + (lvl * 2) + gearDef
-                val flatHp = 20 + (lvl * 6) + gearHp
+                val allPct = ((10 + lvl * 2) * evoMult).roundToInt()
+                val xpPct = ((12 + lvl * 3) * evoMult).roundToInt()
+                val flatAtk = ((8 + lvl * 3) * evoMult).roundToInt() + gearAtk + branchAtkExtra
+                val flatDef = ((6 + lvl * 2) * evoMult).roundToInt() + gearDef + branchDefExtra
+                val flatHp = ((20 + lvl * 6) * evoMult).roundToInt() + gearHp
                 ComputedPetBonus(
                     flatAttack = flatAtk,
                     flatDefense = flatDef,
                     flatMaxHp = flatHp,
-                    flatMaxEnergy = 15 + lvl * 2,
+                    flatMaxEnergy = ((15 + lvl * 2) * evoMult).roundToInt() + branchEnergyExtra,
                     attackMultiplier = 1.0f + (allPct / 100f),
                     defenseMultiplier = 1.0f + (allPct / 100f),
                     maxHpMultiplier = 1.0f + (allPct / 100f),
                     xpMultiplier = 1.0f + (xpPct / 100f),
                     sunshardMultiplier = 1.0f + (allPct / 100f),
-                    summaryText = "+$allPct% All Stats/Shards · +$xpPct% XP"
+                    summaryText = "+$allPct% All Stats/Shards · +$xpPct% XP$stageTag"
                 )
             }
         }

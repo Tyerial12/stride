@@ -127,6 +127,25 @@ object WatchDeviceClassifier {
         val raw = runCatching { device.name }.getOrNull()?.trim()
         return if (!raw.isNullOrBlank()) raw else "Smart Watch"
     }
+
+    /**
+     * Returns true when the connected smartwatch / wearable supports sleep tracking
+     * (Samsung Galaxy Watch, Galaxy Fit, Galaxy Ring, Pixel Watch, Wear OS, Garmin, Fitbit,
+     * Amazfit, Oura, Whoop, Polar, Suunto, Withings, etc.).
+     */
+    fun isSleepCapableWatch(rawName: String?): Boolean {
+        val name = rawName?.trim()?.lowercase(Locale.US) ?: return false
+        if (name.isBlank() || name == "no watch connected" || name == "none") return false
+        if (excludedKeywords.any { name.contains(it) }) return false
+        // Vintage pebble-only or basic pedometer clips without sleep sensors
+        if (name.contains("basic pedometer") || name.contains("step clip")) return false
+        return isSmartWatchName(name) ||
+            name.contains("galaxy") ||
+            name.contains("samsung") ||
+            name.contains("smart watch") ||
+            name.contains("smartwatch") ||
+            name.contains("wearable")
+    }
 }
 
 /**
@@ -176,62 +195,54 @@ object WatchConnectionDetector {
         }
 
         if (hasPerm && manager != null) {
-            // 1. Live BLE GATT connected watches (Galaxy Watch, Wear OS, Garmin, Fitbit, etc.)
-            val gattDevices = runCatching {
-                manager.getConnectedDevices(BluetoothProfile.GATT)
-            }.getOrDefault(emptyList())
-            val gattWatch = gattDevices.firstOrNull {
-                it.address !in ignoredAddresses && WatchDeviceClassifier.isSmartWatchDevice(it, true)
-            }
-            if (gattWatch != null) {
-                return DetectedWatchConnection(
-                    connected = true,
-                    displayName = WatchDeviceClassifier.safeDeviceName(gattWatch, true),
-                    identifier = gattWatch.address,
-                    transport = "Bluetooth GATT",
-                    bluetoothEnabled = true,
-                    bluetoothPermissionGranted = true
-                )
-            }
-
-            // 2. Live BLE GATT Server connected watches (Galaxy Wearable / Samsung Accessory Service)
-            val gattServerDevices = runCatching {
-                manager.getConnectedDevices(BluetoothProfile.GATT_SERVER)
-            }.getOrDefault(emptyList())
-            val gattServerWatch = gattServerDevices.firstOrNull {
-                it.address !in ignoredAddresses && WatchDeviceClassifier.isSmartWatchDevice(it, true)
-            }
-            if (gattServerWatch != null) {
-                return DetectedWatchConnection(
-                    connected = true,
-                    displayName = WatchDeviceClassifier.safeDeviceName(gattServerWatch, true),
-                    identifier = gattServerWatch.address,
-                    transport = "Bluetooth BLE Link",
-                    bluetoothEnabled = true,
-                    bluetoothPermissionGranted = true
-                )
-            }
-
-            // 3. Live Bluetooth HFP (Headset/Calls) connected watch (Galaxy Watch classic BT link)
+            // 1. Live Bluetooth HFP (Headset/Calls) connected watch (Galaxy Watch / Wear OS active BT link).
+            //    Unlike BLE GATT / GATT_SERVER (which stay registered in the background via autoConnect=true
+            //    even when the watch is disconnected), BluetoothProfile.HEADSET only lists watches that are
+            //    actively connected right now and drops immediately on disconnect.
             val hfpDevices = runCatching {
                 headsetProxy?.connectedDevices.orEmpty()
             }.getOrDefault(emptyList())
-            val hfpWatch = hfpDevices.firstOrNull {
-                it.address !in ignoredAddresses && WatchDeviceClassifier.isSmartWatchDevice(it, true)
+            val hfpWatch = hfpDevices.firstOrNull { device ->
+                device.address !in ignoredAddresses &&
+                    WatchDeviceClassifier.isSmartWatchDevice(device, true) &&
+                    runCatching {
+                        headsetProxy?.getConnectionState(device) == BluetoothProfile.STATE_CONNECTED
+                    }.getOrDefault(true)
             }
             if (hfpWatch != null) {
                 return DetectedWatchConnection(
                     connected = true,
                     displayName = WatchDeviceClassifier.safeDeviceName(hfpWatch, true),
                     identifier = hfpWatch.address,
-                    transport = "Bluetooth Call Link",
+                    transport = "Bluetooth Watch Link",
                     bluetoothEnabled = true,
                     bluetoothPermissionGranted = true
                 )
             }
+        }
 
-            // 4. Active ACL-connected watch tracked in real time from ACTION_ACL_CONNECTED
-            val aclEntry = activeAclWatches.entries.firstOrNull { it.key !in ignoredAddresses }
+        // 2. Zero-permission live AudioManager Bluetooth SCO / BLE Headset watch check.
+        //    Drops immediately the instant the Galaxy Watch disconnects.
+        val audioWatch = findConnectedAudioManagerWatch(context)
+        if (audioWatch != null) {
+            val isIgnored = ignoredAddresses.any { addr ->
+                addr.equals(audioWatch.identifier, ignoreCase = true) ||
+                    addr.equals(audioWatch.displayName, ignoreCase = true)
+            }
+            if (!isIgnored) {
+                return audioWatch.copy(
+                    bluetoothEnabled = btEnabled,
+                    bluetoothPermissionGranted = hasPerm
+                )
+            }
+        }
+
+        // 3. Active ACL-connected watch tracked in real time from ACTION_ACL_CONNECTED
+        //    (only when no HFP proxy is bound yet or for non-voice fitness wearables).
+        if (hasPerm && manager != null && headsetProxy == null) {
+            val aclEntry = activeAclWatches.entries.firstOrNull { (addr, _) ->
+                addr !in ignoredAddresses
+            }
             if (aclEntry != null) {
                 return DetectedWatchConnection(
                     connected = true,
@@ -244,17 +255,6 @@ object WatchConnectionDetector {
             }
         }
 
-        // 5. Zero-permission live AudioManager Bluetooth SCO / BLE Headset watch check
-        if (ignoredAddresses.isEmpty()) {
-            val audioWatch = findConnectedAudioManagerWatch(context)
-            if (audioWatch != null) {
-                return audioWatch.copy(
-                    bluetoothEnabled = btEnabled,
-                    bluetoothPermissionGranted = hasPerm
-                )
-            }
-        }
-
         return null
     }
 
@@ -262,13 +262,15 @@ object WatchConnectionDetector {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
             ?: return null
         val devices = runCatching {
-            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            audioManager.getDevices(AudioManager.GET_DEVICES_ALL)
         }.getOrDefault(emptyArray())
 
         for (info in devices) {
             val isBluetoothAudio = info.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                info.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
                 (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                    info.type == AudioDeviceInfo.TYPE_BLE_HEADSET)
+                    (info.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                        info.type == AudioDeviceInfo.TYPE_BLE_SPEAKER))
             if (!isBluetoothAudio) continue
 
             val productName = info.productName?.toString()?.trim().orEmpty()
@@ -285,9 +287,12 @@ object WatchConnectionDetector {
     }
 
     /**
-     * Full live check across Bluetooth profiles, AudioManager, and Wear OS NodeClient (isNearby == true).
+     * Full live check across Bluetooth HFP Headset profile and AudioManager.
      * Used by both GalaxyWatchBridge and StepBackgroundSyncWorker.
+     * Never uses persistent background BLE GATT/GATT_SERVER autoConnect registrations or stale
+     * Play Services Wear OS NodeClient caches that stay true when the watch is disconnected.
      */
+    @SuppressLint("MissingPermission")
     suspend fun detectConnectedWatch(
         context: Context,
         headsetProxy: BluetoothHeadset? = null,
@@ -312,7 +317,7 @@ object WatchConnectionDetector {
             )
         }
 
-        // 1. Live Bluetooth profiles + ACL + AudioManager (highest immediacy & accuracy)
+        // Live Bluetooth HFP Headset + AudioManager + verified ACL state
         val btWatch = findConnectedBluetoothWatch(
             context = appContext,
             headsetProxy = headsetProxy,
@@ -321,31 +326,6 @@ object WatchConnectionDetector {
         )
         if (btWatch != null) {
             return btWatch
-        }
-
-        // 2. Wear OS NodeClient nearby check (works for Galaxy Watch 4/5/6/7/Ultra & Pixel Watch
-        //    without needing a custom watch APK or BLUETOOTH_CONNECT permission).
-        //    Suppressed briefly after an explicit ACL/Audio disconnect event so stale Play Services
-        //    cache cannot flip the UI back to connected while tearing down.
-        if (!suppressWearNodeCache) {
-            val nearbyWearNode = withTimeoutOrNull(WEAR_NODE_TIMEOUT_MS) {
-                runCatching {
-                    Wearable.getNodeClient(appContext).connectedNodes.await()
-                        .firstOrNull { it.isNearby }
-                }.onFailure { err ->
-                    Log.d(TAG, "Wear NodeClient check skipped: ${err.message}")
-                }.getOrNull()
-            }
-            if (nearbyWearNode != null) {
-                return DetectedWatchConnection(
-                    connected = true,
-                    displayName = nearbyWearNode.displayName.ifBlank { "Wear OS Watch" },
-                    identifier = nearbyWearNode.id,
-                    transport = "Wear OS Nearby",
-                    bluetoothEnabled = btEnabled,
-                    bluetoothPermissionGranted = hasBtPerm
-                )
-            }
         }
 
         return DetectedWatchConnection(

@@ -532,13 +532,13 @@ object ProgressionEngine {
     fun parseSkillRanks(raw: String): List<Int> {
         val tokens = raw.split(",")
         return List(SKILL_NODE_COUNT) { idx ->
-            tokens.getOrNull(idx)?.trim()?.toIntOrNull()?.coerceIn(0, 5) ?: 0
+            tokens.getOrNull(idx)?.trim()?.toIntOrNull()?.coerceIn(0, ClassSkillCatalog.MAX_SKILL_RANK) ?: 0
         }
     }
 
     fun serializeSkillRanks(ranks: List<Int>): String {
         return List(SKILL_NODE_COUNT) { idx ->
-            (ranks.getOrNull(idx) ?: 0).coerceIn(0, 5)
+            (ranks.getOrNull(idx) ?: 0).coerceIn(0, ClassSkillCatalog.MAX_SKILL_RANK)
         }.joinToString(",")
     }
 
@@ -731,11 +731,10 @@ object ProgressionEngine {
             title = "Sunhaven Skirmisher",
             description = "Win 2 tactical battles today",
             targetCount = 2L,
-            sunshardReward = 22L,
-            xpReward = 70L,
-            solCoinReward = 15L,
-            chestRewardTier = LootChestTier.HIGHLAND,
-            chestUltraRarePct = 15
+            sunshardReward = 38L,
+            xpReward = 95L,
+            solCoinReward = 22L,
+            chestRewardTier = null
         ),
         QuestSpec(
             id = "daily_expedition_1",
@@ -743,21 +742,20 @@ object ProgressionEngine {
             title = "Dawn Recon Bounty",
             description = "Complete 1 Timed Expedition today",
             targetCount = 1L,
-            sunshardReward = 30L,
-            xpReward = 95L,
-            solCoinReward = 16L,
-            chestRewardTier = LootChestTier.EXPEDITION,
-            chestUltraRarePct = 25
+            sunshardReward = 45L,
+            xpReward = 125L,
+            solCoinReward = 24L,
+            chestRewardTier = null
         ),
         QuestSpec(
             id = "daily_chests_1",
             category = QuestCategory.DAILY,
             title = "Vault Unsealer",
-            description = "Unseal 1 single-use Treasure Chest today",
+            description = "Unseal 1 Boss, Dungeon, or Expedition Chest today",
             targetCount = 1L,
-            sunshardReward = 20L,
-            xpReward = 60L,
-            solCoinReward = 12L
+            sunshardReward = 28L,
+            xpReward = 80L,
+            solCoinReward = 16L
         ),
         QuestSpec(
             id = "weekly_steps_5k",
@@ -765,11 +763,10 @@ object ProgressionEngine {
             title = "Highland Stride",
             description = "Walk 5,000 steps this week with your smart watch or phone",
             targetCount = 5000L,
-            sunshardReward = 70L,
-            xpReward = 220L,
-            solCoinReward = 45L,
-            chestRewardTier = LootChestTier.BOSS_VAULT,
-            chestUltraRarePct = 35
+            sunshardReward = 110L,
+            xpReward = 310L,
+            solCoinReward = 65L,
+            chestRewardTier = null
         ),
         QuestSpec(
             id = "weekly_steps_15k",
@@ -777,11 +774,10 @@ object ProgressionEngine {
             title = "Sunspire Marathon",
             description = "Walk 15,000 steps this week",
             targetCount = 15000L,
-            sunshardReward = 140L,
-            xpReward = 450L,
-            solCoinReward = 85L,
-            chestRewardTier = LootChestTier.SPIRE_SOVEREIGN,
-            chestUltraRarePct = 55
+            sunshardReward = 220L,
+            xpReward = 620L,
+            solCoinReward = 120L,
+            chestRewardTier = null
         ),
         QuestSpec(
             id = "milestone_level_5",
@@ -789,9 +785,9 @@ object ProgressionEngine {
             title = "Awakened Class Arts",
             description = "Reach Hero Level 5 to unlock your 2nd Active Class Skill",
             targetCount = 5L,
-            sunshardReward = 50L,
-            xpReward = 140L,
-            solCoinReward = 35L
+            sunshardReward = 65L,
+            xpReward = 160L,
+            solCoinReward = 40L
         ),
         QuestSpec(
             id = "milestone_level_8",
@@ -799,9 +795,9 @@ object ProgressionEngine {
             title = "Highland Falconer",
             description = "Reach Hero Level 8 to recruit the Epic Dune Falcon companion",
             targetCount = 8L,
-            sunshardReward = 80L,
-            xpReward = 210L,
-            solCoinReward = 45L,
+            sunshardReward = 95L,
+            xpReward = 240L,
+            solCoinReward = 55L,
             companionReward = PetType.DUNE_FALCON
         ),
         QuestSpec(
@@ -810,11 +806,10 @@ object ProgressionEngine {
             title = "Master of Sunhaven",
             description = "Reach Hero Level 12 to unlock your 3rd Signature Skill & earn Cinder Lynx",
             targetCount = 12L,
-            sunshardReward = 115L,
-            xpReward = 320L,
-            solCoinReward = 75L,
-            chestRewardTier = LootChestTier.BOSS_VAULT,
-            chestUltraRarePct = 40,
+            sunshardReward = 160L,
+            xpReward = 400L,
+            solCoinReward = 95L,
+            chestRewardTier = null,
             companionReward = PetType.CINDER_LYNX
         ),
         QuestSpec(
@@ -823,11 +818,10 @@ object ProgressionEngine {
             title = "Keeper of the Sunlit Oasis",
             description = "Reach Hero Level 18 to recruit the Solar Oasis Tortoise companion",
             targetCount = 18L,
-            sunshardReward = 190L,
-            xpReward = 480L,
-            solCoinReward = 100L,
-            chestRewardTier = LootChestTier.BOSS_VAULT,
-            chestUltraRarePct = 55,
+            sunshardReward = 240L,
+            xpReward = 580L,
+            solCoinReward = 130L,
+            chestRewardTier = null,
             companionReward = PetType.OASIS_TORTOISE
         ),
         QuestSpec(
@@ -836,11 +830,10 @@ object ProgressionEngine {
             title = "Zenith Phoenix Ascendant",
             description = "Reach Hero Level 25 to awaken the Legendary Solar Phoenix companion",
             targetCount = 25L,
-            sunshardReward = 320L,
-            xpReward = 750L,
-            solCoinReward = 150L,
-            chestRewardTier = LootChestTier.SPIRE_SOVEREIGN,
-            chestUltraRarePct = 80,
+            sunshardReward = 420L,
+            xpReward = 950L,
+            solCoinReward = 190L,
+            chestRewardTier = null,
             companionReward = PetType.SOLAR_PHOENIX
         ),
         QuestSpec(
@@ -849,11 +842,10 @@ object ProgressionEngine {
             title = "Conqueror of Sunlit Dunes",
             description = "Clear Realm 1 (Defeat Helios Colossus at Stage 5)",
             targetCount = 1L,
-            sunshardReward = 60L,
-            xpReward = 200L,
-            solCoinReward = 40L,
-            chestRewardTier = LootChestTier.BOSS_VAULT,
-            chestUltraRarePct = 35
+            sunshardReward = 90L,
+            xpReward = 260L,
+            solCoinReward = 55L,
+            chestRewardTier = null
         ),
         QuestSpec(
             id = "milestone_realm_5",
@@ -861,11 +853,10 @@ object ProgressionEngine {
             title = "Sovereign of the Zenith Citadel",
             description = "Clear Realm 5 (Defeat Aurelius the Eternal)",
             targetCount = 5L,
-            sunshardReward = 180L,
-            xpReward = 600L,
-            solCoinReward = 120L,
-            chestRewardTier = LootChestTier.SPIRE_SOVEREIGN,
-            chestUltraRarePct = 75
+            sunshardReward = 250L,
+            xpReward = 750L,
+            solCoinReward = 150L,
+            chestRewardTier = null
         ),
         QuestSpec(
             id = "milestone_realm_10",
@@ -873,11 +864,10 @@ object ProgressionEngine {
             title = "Ascendant of Celestial Solaris",
             description = "Clear Realm 10 (Defeat Sol Invictus Prime)",
             targetCount = 10L,
-            sunshardReward = 450L,
-            xpReward = 1500L,
-            solCoinReward = 250L,
-            chestRewardTier = LootChestTier.SPIRE_SOVEREIGN,
-            chestUltraRarePct = 100
+            sunshardReward = 580L,
+            xpReward = 1800L,
+            solCoinReward = 300L,
+            chestRewardTier = null
         ),
         QuestSpec(
             id = "milestone_spire_5",
@@ -885,11 +875,10 @@ object ProgressionEngine {
             title = "Spire Challenger",
             description = "Clear Floor 5 of the Endless Spire Gauntlet",
             targetCount = 5L,
-            sunshardReward = 85L,
-            xpReward = 260L,
-            solCoinReward = 55L,
-            chestRewardTier = LootChestTier.SPIRE_SOVEREIGN,
-            chestUltraRarePct = 45
+            sunshardReward = 125L,
+            xpReward = 340L,
+            solCoinReward = 75L,
+            chestRewardTier = null
         ),
         QuestSpec(
             id = "milestone_spire_15",
@@ -897,11 +886,10 @@ object ProgressionEngine {
             title = "Spire Sovereign",
             description = "Clear Floor 15 of the Endless Spire Gauntlet",
             targetCount = 15L,
-            sunshardReward = 210L,
-            xpReward = 650L,
-            solCoinReward = 130L,
-            chestRewardTier = LootChestTier.SPIRE_SOVEREIGN,
-            chestUltraRarePct = 85
+            sunshardReward = 290L,
+            xpReward = 820L,
+            solCoinReward = 165L,
+            chestRewardTier = null
         ),
         QuestSpec(
             id = "milestone_bosses_5",
@@ -909,11 +897,10 @@ object ProgressionEngine {
             title = "Bane of Guardians",
             description = "Win 5 True Boss Battles",
             targetCount = 5L,
-            sunshardReward = 100L,
-            xpReward = 300L,
-            solCoinReward = 60L,
-            chestRewardTier = LootChestTier.BOSS_VAULT,
-            chestUltraRarePct = 50
+            sunshardReward = 150L,
+            xpReward = 400L,
+            solCoinReward = 85L,
+            chestRewardTier = null
         )
     )
 
@@ -974,21 +961,15 @@ object ProgressionEngine {
         return (filtered + newClaimKey).distinct().takeLast(45)
     }
 
+    /**
+     * Strict Pinnacle Chest Rule: Quests never grant Loot Chests (Chests are earned strictly
+     * after Boss fights, Multi-Room Step Dungeon clears, and Timed Expedition completions).
+     */
     fun buildQuestChest(
         userId: String,
         profile: HeroProfile,
         spec: QuestSpec
-    ): LootChest? {
-        val tier = spec.chestRewardTier ?: return null
-        return LootChest(
-            userId = userId,
-            chestTier = tier.name,
-            sourceLabel = "Quest: ${spec.title}",
-            heroLevelSnapshot = profile.level.coerceAtLeast(1L),
-            durationMinutes = if (tier == LootChestTier.EXPEDITION) 60L else 0L,
-            ultraRareChancePct = spec.chestUltraRarePct.toLong().coerceIn(10L, 100L)
-        )
-    }
+    ): LootChest? = null
 
     const val FULL_SLEEP_TARGET_MINUTES: Long = 480L // 8 hours = 100% sleep
     const val MIN_CREDITED_SLEEP_MINUTES: Long = 10L
@@ -1018,7 +999,38 @@ object ProgressionEngine {
     }
 
     /**
-     * Steps exclusively level the Hero (Hero XP) and fuel the Companion Pet Arena Widget.
+     * Real-world steps directly recharge Battle Energy (1 EN per 15 steps, scaled by Step Energy multiplier
+     * and active Sleep Sanctuary Dream Tier) as well as Encounter Gauge progress.
+     */
+    fun computeStepEnergyGain(stepDelta: Long, stepEnergyMultiplier: Float = 1.0f): Long {
+        if (stepDelta <= 0L) return 0L
+        val raw = (stepDelta.toFloat() / 15.0f) * stepEnergyMultiplier.coerceAtLeast(1.0f)
+        return raw.roundToInt().toLong().coerceAtLeast(1L)
+    }
+
+    /**
+     * Real-world Stamina recovery from steps:
+     * - If the player has a watch that detects sleep (`hasWatchSleepDetection == true`), steps act as
+     *   a minor trickle (+1 Stamina per 110 steps) while Watch Sleep restores primary Stamina.
+     * - If the player does NOT have a watch that detects sleep (`hasWatchSleepDetection == false`),
+     *   steps count directly for BOTH Battle Energy AND Hero Stamina at the full rate (1 STA per 15 steps,
+     *   scaled by `stepEnergyMultiplier`).
+     */
+    fun computeStepStaminaRecovery(
+        stepDelta: Long,
+        hasWatchSleepDetection: Boolean = false,
+        stepEnergyMultiplier: Float = 1.0f
+    ): Int {
+        if (stepDelta <= 0L) return 0
+        return if (hasWatchSleepDetection) {
+            (stepDelta / 110L).toInt().coerceAtLeast(if (stepDelta >= 40L) 1 else 0)
+        } else {
+            computeStepEnergyGain(stepDelta, stepEnergyMultiplier).toInt().coerceAtLeast(1)
+        }
+    }
+
+    /**
+     * Steps level the Hero (Hero XP) and fuel the Companion Pet Arena Widget.
      * Converts synced step deltas into Hero XP (1 XP per 4 steps, scaled by Hero XP multiplier).
      */
     fun computeHeroStepXp(stepDelta: Long, xpMultiplier: Float = 1.0f): Long {

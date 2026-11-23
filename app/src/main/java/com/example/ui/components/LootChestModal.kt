@@ -170,7 +170,12 @@ fun InteractiveLootChestDialog(
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
+                            EquipmentArtworkForItem(
+                                item = item,
+                                size = 84.dp
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
                             Text(
                                 text = item.name,
                                 style = MaterialTheme.typography.titleLarge,

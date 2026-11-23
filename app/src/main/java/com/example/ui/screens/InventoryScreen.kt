@@ -92,8 +92,21 @@ import com.example.ui.components.HeroShowcaseCard
 import com.example.ui.components.LootVaultSection
 import com.example.ui.components.QuestsAndPrestigePanel
 import com.example.ui.components.SkillTreePanel
+import com.example.data.model.BrewGrade
+import com.example.data.model.ForgeGrade
+import com.example.ui.components.ActivityMasteriesPanel
+import com.example.ui.components.AlchemistFlameBrewDialog
+import com.example.ui.components.AnvilTimingForgeDialog
+import com.example.ui.components.ConstellationTalentTreeCard
+import com.example.ui.components.EquipmentArtworkBadge
+import com.example.ui.components.EquipmentArtworkForItem
+import com.example.ui.components.ExpandedBestiaryPanel
+import com.example.ui.components.GearAffixReforgeCard
+import com.example.ui.components.RelicSetCollectionsPanel
+import com.example.ui.components.SeasonJourneyPanel
 import com.example.ui.components.SolCoinBadge
 import com.example.ui.components.SolstrideCard
+import com.example.ui.components.StepSlayerContractsCard
 import com.example.ui.components.TacticalStatBar
 import com.example.ui.components.rarityColorFor
 import com.example.ui.theme.JetBrainsMonoFontFamily
@@ -154,6 +167,13 @@ fun InventoryScreen(
     onResetAllProgress: () -> Unit = {},
     onSalvageItem: (InventoryItem) -> Unit,
     onOpenCharacterMirror: () -> Unit = {},
+    onCompleteAnvilForge: (InventoryItem, ForgeGrade) -> Unit = { _, _ -> },
+    onCompleteAlchemistBrew: (AlchemistRecipeSpec, BrewGrade) -> Unit = { _, _ -> },
+    onClaimSeasonTier: (Int) -> Unit = {},
+    onAllocateExtendedAttribute: (Boolean) -> Unit = {},
+    onUpgradeConstellationNode: (String) -> Unit = {},
+    onReforgeItemAffixes: (InventoryItem) -> Unit = {},
+    onClaimSlayerContract: (String) -> Unit = {},
     worldFog: WorldFogState = WorldFogState(),
     isHeroSleeping: Boolean = false,
     sleepSourceLabel: String = "",
@@ -163,6 +183,8 @@ fun InventoryScreen(
     var selectedFilter by remember { mutableStateOf(InventoryFilter.ALL) }
     var useForgeStabilizer by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
+    var anvilForgeItem by remember { mutableStateOf<InventoryItem?>(null) }
+    var cauldronBrewRecipe by remember { mutableStateOf<AlchemistRecipeSpec?>(null) }
     val ext = LocalSolstrideColors.current
 
     val claimableQuestCount = remember(questStatuses) { questStatuses.count { it.canClaim } }
@@ -293,13 +315,23 @@ fun InventoryScreen(
                     )
                 }
 
+                // Ancient Prefix & Suffix Gear Affix Reforger
+                item {
+                    GearAffixReforgeCard(
+                        profile = profile,
+                        items = inventory,
+                        hardcoreState = hardcoreState,
+                        onReforgeAffixes = onReforgeItemAffixes
+                    )
+                }
+
                 // Alchemist Crafting & Town Market Redirect (All buying happens strictly in Sunhaven Plaza)
                 item {
                     AlchemistCraftingPanel(
                         profile = profile,
                         hardcoreState = hardcoreState,
                         expeditionLocked = expeditionLocked,
-                        onBrewAlchemistRecipe = onBrewAlchemistRecipe,
+                        onBrewAlchemistRecipe = { recipe -> cauldronBrewRecipe = recipe },
                         onVisitTownMarket = onVisitTownMarket
                     )
                 }
@@ -313,6 +345,23 @@ fun InventoryScreen(
                         expeditionLocked = expeditionLocked,
                         onSelectClass = onSelectClass,
                         onSelectSpecialization = onSelectSpecialization
+                    )
+                }
+
+                // 5-Attribute Hero Build & Starlight Constellation Talent Tree
+                item {
+                    ConstellationTalentTreeCard(
+                        profile = profile,
+                        hardcoreState = hardcoreState,
+                        onAllocateCoreStat = { attrKey ->
+                            when (attrKey) {
+                                "might" -> onAllocateMastery(MasteryAttribute.MIGHT)
+                                "vigor" -> onAllocateMastery(MasteryAttribute.VIGOR)
+                                "endurance" -> onAllocateMastery(MasteryAttribute.ENDURANCE)
+                            }
+                        },
+                        onAllocateExtendedStat = onAllocateExtendedAttribute,
+                        onUpgradeConstellation = onUpgradeConstellationNode
                     )
                 }
 
@@ -395,11 +444,30 @@ fun InventoryScreen(
                 item {
                     SkillTreePanel(
                         profile = profile,
+                        onUpgradeSkillNode = onUpgradeSkillNode,
                         onVisitTownSkillTrainer = onVisitTownSkillTrainer
                     )
                 }
             }
             HeroSubTab.QUESTS -> {
+                // Season I: Dawn of Evolution 30-Tier Seasonal Journey
+                item {
+                    SeasonJourneyPanel(
+                        profile = profile,
+                        onClaimSeasonTier = onClaimSeasonTier
+                    )
+                }
+                // 5 Activity Masteries (Combat, Exploration, Smithing, Alchemy, Companion)
+                item {
+                    ActivityMasteriesPanel(hardcoreState = hardcoreState)
+                }
+                // Repeatable Step-Fueled Slayer Contracts
+                item {
+                    StepSlayerContractsCard(
+                        hardcoreState = hardcoreState,
+                        onClaimContract = onClaimSlayerContract
+                    )
+                }
                 item {
                     QuestsAndPrestigePanel(
                         profile = profile,
@@ -409,6 +477,10 @@ fun InventoryScreen(
                         onClaimQuest = onClaimQuest,
                         onTriggerPrestige = onTriggerPrestige
                     )
+                }
+                // Expanded Monster Bestiary Mastery Ranks (Bronze → Apex)
+                item {
+                    ExpandedBestiaryPanel(hardcoreState = hardcoreState)
                 }
                 item {
                     BestiaryAndTitlesPanel(
@@ -464,6 +536,14 @@ fun InventoryScreen(
                     LootVaultSection(
                         chests = chests,
                         onOpenChest = onOpenChest
+                    )
+                }
+
+                // Collectible Relic Set Vault (2pc / 4pc Passive Bonuses • Town-Only Coffer Redirect)
+                item {
+                    RelicSetCollectionsPanel(
+                        hardcoreState = hardcoreState,
+                        onVisitTownMarket = onVisitTownMarket
                     )
                 }
 
@@ -554,7 +634,7 @@ fun InventoryScreen(
                             useStabilizer = useForgeStabilizer,
                             expeditionLocked = expeditionLocked,
                             onEquipOrUse = { onEquipOrUse(item) },
-                            onUpgrade = { onUpgradeItem(item, useForgeStabilizer) },
+                            onUpgrade = { anvilForgeItem = item },
                             onRepair = { onRepairItem(item) },
                             onRerollPerk = { onRerollItemPerk(item) },
                             onAscendRarity = { onAscendItemRarity(item) },
@@ -565,6 +645,34 @@ fun InventoryScreen(
                 }
             }
         }
+    }
+
+    // Interactive Anvil Timing Forge Mini-Game Dialog
+    val forgeTarget = anvilForgeItem
+    if (forgeTarget != null) {
+        AnvilTimingForgeDialog(
+            targetLabel = "${forgeTarget.name} +${forgeTarget.upgradeLevel + 1}",
+            relaxedTiming = hardcoreState.relaxedTimingAssist,
+            onComplete = { grade ->
+                anvilForgeItem = null
+                onCompleteAnvilForge(forgeTarget, grade)
+            },
+            onDismiss = { anvilForgeItem = null }
+        )
+    }
+
+    // Interactive Alchemist Flame Brew Mini-Game Dialog
+    val brewTarget = cauldronBrewRecipe
+    if (brewTarget != null) {
+        AlchemistFlameBrewDialog(
+            recipeName = brewTarget.name,
+            relaxedTiming = hardcoreState.relaxedTimingAssist,
+            onComplete = { grade ->
+                cauldronBrewRecipe = null
+                onCompleteAlchemistBrew(brewTarget, grade)
+            },
+            onDismiss = { cauldronBrewRecipe = null }
+        )
     }
 }
 
@@ -709,25 +817,39 @@ private fun CustomGearForgeCard(
             color = MaterialTheme.colorScheme.surfaceVariant,
             border = BorderStroke(1.dp, ext.borderSubtle)
         ) {
-            Column(modifier = Modifier.padding(10.dp)) {
-                Text(
-                    text = "Recipe Cost • ${selectedTier.baseRarity.label}+ ${selectedSlot.label}",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                EquipmentArtworkBadge(
+                    slot = selectedSlot,
+                    rarity = selectedTier.baseRarity,
+                    affinity = selectedElement,
+                    size = 54.dp
                 )
-                Spacer(modifier = Modifier.height(3.dp))
-                Text(
-                    text = "⛏ ${selectedTier.oreCost} Ore (have ${hardcoreState.sunsteelOre})  •  🌿 ${selectedTier.herbCost} Herbs (have ${hardcoreState.aetherHerbs})",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = JetBrainsMonoFontFamily,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "✨ $essenceCost Essence (have ${hardcoreState.elementalEssence})  •  ☀ ${selectedTier.sunshardCost} Shards (have ${profile.sunshards})",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = JetBrainsMonoFontFamily,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Recipe Cost • ${selectedTier.baseRarity.label}+ ${selectedSlot.label}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = "⛏ ${selectedTier.oreCost} Ore (have ${hardcoreState.sunsteelOre})  •  🌿 ${selectedTier.herbCost} Herbs (have ${hardcoreState.aetherHerbs})",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "✨ $essenceCost Essence (have ${hardcoreState.elementalEssence})  •  ☀ ${selectedTier.sunshardCost} Shards (have ${profile.sunshards})",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
 
@@ -1013,74 +1135,140 @@ private fun ClassSpecializationPanel(
     onSelectSpecialization: (ClassSpecialization) -> Unit
 ) {
     val ext = LocalSolstrideColors.current
+    val currentBaseClass = profile.resolvedClass()
+    val classAscensions = remember(currentBaseClass) { ClassSpecialization.forClass(currentBaseClass) }
+    val groupedByTier = remember(classAscensions) { classAscensions.groupBy { it.classTier }.toSortedMap() }
+
     SolstrideCard(modifier = Modifier.fillMaxWidth(), strongBorder = true) {
-        Text(text = "Base Class & Advanced Specialization", style = MaterialTheme.typography.titleLarge)
-        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "4-Tier Class Ascension Tree",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.ExtraBold
+        )
+        Text(
+            text = "Ascend from your Tier I Base Class through Tier II Advanced Specializations (Lv. 3), Tier III Apex Ascendants (Lv. 10), up to Tier IV Mythic Paragons (Lv. 18)!",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = "TIER I • BASE ARCHETYPE (Lv. 1):",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.ExtraBold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.height(6.dp))
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             HeroClass.entries.forEach { cls ->
-                val active = profile.resolvedClass() == cls
+                val active = currentBaseClass == cls
                 FilterChip(
                     selected = active,
                     enabled = !expeditionLocked,
                     onClick = { onSelectClass(cls) },
-                    label = { Text(cls.displayTitle) },
+                    label = { Text("${cls.displayTitle} (Tier I)") },
                     modifier = Modifier.testTag("class_${cls.name.lowercase()}_chip")
                 )
             }
         }
-        Spacer(modifier = Modifier.height(10.dp))
-        Text(
-            text = "Choose Class Specialization (Unlocks at Level 3 • Grants Elemental Ultimate Ability):",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ClassSpecialization.forClass(profile.resolvedClass()).forEach { spec ->
-                val isSelected = stats.activeSpecialization == spec
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) MaterialTheme.colorScheme.primary else ext.borderSubtle)
-                ) {
+
+        Spacer(modifier = Modifier.height(12.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            groupedByTier.forEach { (tierNum, specsInTier) ->
+                val firstSpec = specsInTier.first()
+                val tierUnlocked = firstSpec.isUnlockedFor(profile)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${firstSpec.tierRoman} • ${firstSpec.tierName.uppercase()}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (tierUnlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (tierUnlocked) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            border = BorderStroke(1.dp, ext.borderSubtle)
+                        ) {
                             Text(
-                                text = "${spec.title} (${spec.affinity.symbol} ${spec.affinity.label})",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Passive: ${spec.passiveSummary}",
+                                text = if (tierUnlocked) "UNLOCKED (Lv.${firstSpec.unlockLevel}+)" else "Unlocks at Lv.${firstSpec.unlockLevel}",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontFamily = JetBrainsMonoFontFamily,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = "Ultimate: ${spec.ultimateName} — ${spec.ultimateSummary}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            onClick = { onSelectSpecialization(spec) },
-                            enabled = !expeditionLocked && !isSelected,
-                            modifier = Modifier
-                                .height(48.dp)
-                                .testTag("select_spec_${spec.name.lowercase()}")
+                    }
+
+                    specsInTier.forEach { spec ->
+                        val isSelected = stats.activeSpecialization == spec
+                        val isSpecUnlocked = spec.isUnlockedFor(profile)
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = when {
+                                isSelected -> MaterialTheme.colorScheme.primaryContainer
+                                tierNum == 4 && isSpecUnlocked -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.45f)
+                                else -> MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            border = BorderStroke(
+                                width = if (isSelected) 2.dp else 1.dp,
+                                color = when {
+                                    isSelected -> MaterialTheme.colorScheme.primary
+                                    tierNum == 4 -> MaterialTheme.colorScheme.tertiary
+                                    else -> ext.borderSubtle
+                                }
+                            )
                         ) {
-                            Text(if (isSelected) "Active" else "Specialize")
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "[${spec.tierRoman}] ${spec.title} (${spec.affinity.symbol} ${spec.affinity.label})",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Text(
+                                        text = "Passive: ${spec.passiveSummary}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "Ultimate: ${spec.ultimateName} — ${spec.ultimateSummary}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = { onSelectSpecialization(spec) },
+                                    enabled = !expeditionLocked && !isSelected && isSpecUnlocked,
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .testTag("select_spec_${spec.name.lowercase()}")
+                                ) {
+                                    Text(
+                                        when {
+                                            isSelected -> "Active"
+                                            !isSpecUnlocked -> "Lv.${spec.unlockLevel}"
+                                            tierNum >= 3 -> "Ascend"
+                                            else -> "Specialize"
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1351,10 +1539,22 @@ private fun InventoryItemCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Top
         ) {
+            val (prefixAffix, suffixAffix) = hardcoreState.affixesForItem(item.id)
+            val fullItemDisplayName = buildString {
+                if (prefixAffix != null) append("${prefixAffix.label} ")
+                append(item.name)
+                if (suffixAffix != null) append(" ${suffixAffix.label}")
+                if (item.upgradeLevel > 0L) append(" +${item.upgradeLevel}")
+            }
+            EquipmentArtworkForItem(
+                item = item,
+                size = 60.dp
+            )
+            Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = if (item.upgradeLevel > 0L) "${item.name} +${item.upgradeLevel}" else item.name,
+                        text = fullItemDisplayName,
                         style = MaterialTheme.typography.titleMedium
                     )
                     if (item.equipped) {
@@ -1366,6 +1566,14 @@ private fun InventoryItemCard(
                             modifier = Modifier.size(18.dp)
                         )
                     }
+                }
+                if (prefixAffix != null || suffixAffix != null) {
+                    Text(
+                        text = "AFFIXES: ${listOfNotNull(prefixAffix?.summary(), suffixAffix?.summary()).joinToString(" • ")}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
                 Spacer(modifier = Modifier.height(2.dp))
                 val runeSuffix = socketedRune?.let { " • ${it.symbol} ${it.label.uppercase()} RUNE" } ?: ""

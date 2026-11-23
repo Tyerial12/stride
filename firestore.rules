@@ -72,6 +72,18 @@ service cloud.firestore {
       ];
     }
 
+    function isValidEvolutionBranch(branch) {
+      return branch is string && branch in ['NONE', 'VANGUARD', 'MYSTIC'];
+    }
+
+    function isValidElementalAffinity(aff) {
+      return aff is string && aff in ['EMBER', 'FROST', 'VOID', 'TERRA', 'SOLAR'];
+    }
+
+    function isValidTownBuildingLevels(levels) {
+      return levels is string && levels.matches('^[1-5](,[1-5]){4}$');
+    }
+
     function intBound(v, lo, hi) {
       return v is int && v >= lo && v <= hi;
     }
@@ -127,7 +139,16 @@ service cloud.firestore {
              d.get('claimedQuestIds', []).size() <= 80 &&
              d.get('chestsOpenedTotal', 0) >= 0 &&
              (!('avatarConfig' in d) || isValidAvatarConfig(d.avatarConfig)) &&
-             (!('characterCreated' in d) || d.characterCreated is bool);
+             (!('characterCreated' in d) || d.characterCreated is bool) &&
+             optInt(d, 'migrationVersion', 0, 99) &&
+             (!('guildId' in d) || (d.guildId is string && d.guildId.size() <= 128)) &&
+             (!('seasonKey' in d) || (d.seasonKey is string && d.seasonKey.size() <= 40)) &&
+             optInt(d, 'seasonXp', 0, 10000000) &&
+             (!('claimedSeasonTiers' in d) || (d.claimedSeasonTiers is list && d.claimedSeasonTiers.size() <= 40)) &&
+             (!('townBuildingLevels' in d) || isValidTownBuildingLevels(d.townBuildingLevels)) &&
+             optInt(d, 'evolutionShards', 0, 99999) &&
+             optInt(d, 'mythicCores', 0, 9999) &&
+             optInt(d, 'guildCrestsOwned', 0, 99);
     }
 
     function isValidInventoryItem(data) {
@@ -175,6 +196,12 @@ service cloud.firestore {
              intBound(d.xpToNextLevel, 1, 1000000) &&
              isValidPetWeaponId(d.equippedWeaponId) &&
              isValidPetArmorId(d.equippedArmorId) &&
+             optInt(d, 'evolutionStage', 1, 3) &&
+             (!('evolutionBranch' in d) || isValidEvolutionBranch(d.evolutionBranch)) &&
+             optInt(d, 'bondXp', 0, 1000000) &&
+             optInt(d, 'stepsWalkedWithPet', 0, 100000000) &&
+             (!('lastCareDateKey' in d) || (d.lastCareDateKey is string && d.lastCareDateKey.size() <= 20)) &&
+             optInt(d, 'dailyCareActions', 0, 20) &&
              d.createdAt is timestamp && d.createdAt <= request.time &&
              d.updatedAt is timestamp && d.updatedAt <= request.time;
     }
@@ -217,6 +244,9 @@ service cloud.firestore {
                          'dailyQuestDateKey', 'dailyBattlesWon', 'dailyExpeditionsDone',
                          'dailyChestsOpened', 'claimedQuestIds', 'chestsOpenedTotal',
                          'avatarConfig', 'characterCreated',
+                         'migrationVersion', 'guildId', 'seasonKey', 'seasonXp',
+                         'claimedSeasonTiers', 'townBuildingLevels',
+                         'evolutionShards', 'mythicCores', 'guildCrestsOwned',
                          'createdAt', 'updatedAt'
                        ]) &&
                        isValidHeroProfile(request.resource.data);
@@ -238,6 +268,9 @@ service cloud.firestore {
                          'dailyQuestDateKey', 'dailyBattlesWon', 'dailyExpeditionsDone',
                          'dailyChestsOpened', 'claimedQuestIds', 'chestsOpenedTotal',
                          'avatarConfig', 'characterCreated',
+                         'migrationVersion', 'guildId', 'seasonKey', 'seasonXp',
+                         'claimedSeasonTiers', 'townBuildingLevels',
+                         'evolutionShards', 'mythicCores', 'guildCrestsOwned',
                          'updatedAt'
                        ]) &&
                        isValidHeroProfile(request.resource.data);
@@ -322,7 +355,10 @@ service cloud.firestore {
                          ]) &&
                          incoming().keys().hasOnly([
                            'userId', 'petType', 'level', 'xp', 'xpToNextLevel',
-                           'equippedWeaponId', 'equippedArmorId', 'createdAt', 'updatedAt'
+                           'equippedWeaponId', 'equippedArmorId',
+                           'evolutionStage', 'evolutionBranch', 'bondXp',
+                           'stepsWalkedWithPet', 'lastCareDateKey', 'dailyCareActions',
+                           'createdAt', 'updatedAt'
                          ]) &&
                          isValidOwnedPet(incoming());
 
@@ -336,7 +372,10 @@ service cloud.firestore {
                          incoming().createdAt == existing().createdAt &&
                          incoming().diff(existing()).affectedKeys().hasOnly([
                            'level', 'xp', 'xpToNextLevel',
-                           'equippedWeaponId', 'equippedArmorId', 'updatedAt'
+                           'equippedWeaponId', 'equippedArmorId',
+                           'evolutionStage', 'evolutionBranch', 'bondXp',
+                           'stepsWalkedWithPet', 'lastCareDateKey', 'dailyCareActions',
+                           'updatedAt'
                          ]);
 
         allow delete: if isSignedIn() && isValidId(userId) && isValidId(petId) && request.auth.uid == userId;
@@ -390,6 +429,8 @@ service cloud.firestore {
              isValidAvatarConfig(d.avatarConfig) &&
              d.equippedPetId in ['', 'SUNFOX_KIT', 'AEGIS_SCARAB', 'DUNE_FALCON', 'CINDER_LYNX', 'OASIS_TORTOISE', 'SOLAR_PHOENIX'] &&
              optInt(d, 'equippedPetLevel', 1, 50) &&
+             optInt(d, 'equippedPetStage', 1, 3) &&
+             (!('equippedPetBranch' in d) || isValidEvolutionBranch(d.equippedPetBranch)) &&
              (d.posX is number) && d.posX >= 0.0 && d.posX <= 1.0 &&
              (d.posY is number) && d.posY >= 0.0 && d.posY <= 1.0 &&
              d.facingRight is bool &&
@@ -413,6 +454,7 @@ service cloud.firestore {
                                incoming().keys().hasOnly([
                                  'userId', 'displayName', 'heroClass', 'heroLevel', 'heroPower',
                                  'prestigeLevel', 'avatarConfig', 'equippedPetId', 'equippedPetLevel',
+                                 'equippedPetStage', 'equippedPetBranch',
                                  'posX', 'posY', 'facingRight', 'emote', 'inTown', 'updatedAt'
                                ]) &&
                                isValidTownPresence(incoming());
@@ -630,6 +672,255 @@ service cloud.firestore {
                        isValidId(playdateId) &&
                        request.auth.uid in existing().participantUids &&
                        existing().status in ['FINISHED', 'DECLINED'];
+    }
+
+    // --- Collection: /world_bosses/{weekKey} (Shared Weekly World Boss) ---
+    function isValidWorldBoss(d) {
+      return d.weekKey is string && d.weekKey.size() >= 4 && d.weekKey.size() <= 20 &&
+             d.bossName is string && d.bossName.size() >= 1 && d.bossName.size() <= 60 &&
+             isValidElementalAffinity(d.elementalAffinity) &&
+             intBound(d.maxHp, 1000, 10000000) &&
+             intBound(d.currentHp, 0, 10000000) &&
+             d.currentHp <= d.maxHp &&
+             intBound(d.totalStrikes, 0, 10000000) &&
+             d.publicVisible is bool &&
+             d.createdAt is timestamp && d.createdAt <= request.time &&
+             d.updatedAt is timestamp && d.updatedAt <= request.time;
+    }
+
+    function isValidWorldBossContribution(d) {
+      return isValidId(d.userId) &&
+             d.userId == request.auth.uid &&
+             d.weekKey is string && d.weekKey.size() >= 4 && d.weekKey.size() <= 20 &&
+             d.displayName is string && d.displayName.size() >= 1 && d.displayName.size() <= 50 &&
+             intBound(d.totalDamage, 0, 100000000) &&
+             intBound(d.strikesCount, 0, 100000) &&
+             intBound(d.claimedMilestoneTier, 0, 10) &&
+             d.updatedAt is timestamp && d.updatedAt <= request.time;
+    }
+
+    match /world_bosses/{weekKey} {
+      allow get: if isSignedIn() && isValidId(weekKey);
+      allow list: if isSignedIn() && resource.data.publicVisible == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(weekKey) &&
+                       incoming().weekKey == weekKey &&
+                       incoming().publicVisible == true &&
+                       incoming().keys().hasAll([
+                         'weekKey', 'bossName', 'elementalAffinity', 'maxHp',
+                         'currentHp', 'totalStrikes', 'publicVisible', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'weekKey', 'bossName', 'elementalAffinity', 'maxHp',
+                         'currentHp', 'totalStrikes', 'publicVisible', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidWorldBoss(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(weekKey) &&
+                       incoming().weekKey == existing().weekKey &&
+                       incoming().bossName == existing().bossName &&
+                       incoming().maxHp == existing().maxHp &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'currentHp', 'totalStrikes', 'updatedAt'
+                       ]) &&
+                       incoming().currentHp <= existing().currentHp &&
+                       incoming().totalStrikes >= existing().totalStrikes &&
+                       isValidWorldBoss(incoming());
+
+      allow delete: if false;
+
+      match /contributions/{userId} {
+        allow get, list: if isSignedIn() && isValidId(weekKey);
+
+        allow create, update: if isSignedIn() &&
+                                 isValidId(weekKey) &&
+                                 isValidId(userId) &&
+                                 request.auth.uid == userId &&
+                                 incoming().weekKey == weekKey &&
+                                 incoming().keys().hasAll([
+                                   'userId', 'weekKey', 'displayName', 'totalDamage',
+                                   'strikesCount', 'claimedMilestoneTier', 'updatedAt'
+                                 ]) &&
+                                 incoming().keys().hasOnly([
+                                   'userId', 'weekKey', 'displayName', 'totalDamage',
+                                   'strikesCount', 'claimedMilestoneTier', 'updatedAt'
+                                 ]) &&
+                                 isValidWorldBossContribution(incoming());
+
+        allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      }
+    }
+
+    // --- Collection: /coop_raids/{raidId} (Live 2-4 Player Co-op Boss Raids) ---
+    function isValidRaidStatus(s) {
+      return s is string && s in ['OPEN', 'ACTIVE', 'VICTORY'];
+    }
+
+    function isValidCoopRaid(d) {
+      return isValidId(d.hostUid) &&
+             d.hostName is string && d.hostName.size() >= 1 && d.hostName.size() <= 50 &&
+             d.bossName is string && d.bossName.size() >= 1 && d.bossName.size() <= 60 &&
+             isValidElementalAffinity(d.bossAffinity) &&
+             intBound(d.bossMaxHp, 1000, 1000000) &&
+             intBound(d.bossCurrentHp, 0, 1000000) &&
+             d.bossCurrentHp <= d.bossMaxHp &&
+             d.participantUids is list && d.participantUids.size() >= 1 && d.participantUids.size() <= 4 &&
+             d.participantNames is list && d.participantNames.size() == d.participantUids.size() &&
+             isValidRaidStatus(d.status) &&
+             intBound(d.totalTeamDamage, 0, 10000000) &&
+             d.lastActionLog is string && d.lastActionLog.size() <= 240 &&
+             d.claimedUids is list && d.claimedUids.size() <= 4 &&
+             d.publicVisible is bool &&
+             d.createdAt is timestamp && d.createdAt <= request.time &&
+             d.updatedAt is timestamp && d.updatedAt <= request.time;
+    }
+
+    match /coop_raids/{raidId} {
+      allow get: if isSignedIn() && isValidId(raidId);
+      allow list: if isSignedIn() && resource.data.publicVisible == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(raidId) &&
+                       incoming().hostUid == request.auth.uid &&
+                       incoming().participantUids.size() == 1 &&
+                       incoming().participantUids[0] == request.auth.uid &&
+                       incoming().status == 'OPEN' &&
+                       incoming().publicVisible == true &&
+                       incoming().keys().hasAll([
+                         'hostUid', 'hostName', 'bossName', 'bossAffinity',
+                         'bossMaxHp', 'bossCurrentHp', 'participantUids', 'participantNames',
+                         'status', 'totalTeamDamage', 'lastActionLog', 'claimedUids',
+                         'publicVisible', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'hostUid', 'hostName', 'bossName', 'bossAffinity',
+                         'bossMaxHp', 'bossCurrentHp', 'participantUids', 'participantNames',
+                         'status', 'totalTeamDamage', 'lastActionLog', 'claimedUids',
+                         'publicVisible', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidCoopRaid(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(raidId) &&
+                       incoming().hostUid == existing().hostUid &&
+                       incoming().bossMaxHp == existing().bossMaxHp &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'bossCurrentHp', 'participantUids', 'participantNames',
+                         'status', 'totalTeamDamage', 'lastActionLog', 'claimedUids', 'updatedAt'
+                       ]) &&
+                       isValidCoopRaid(incoming()) &&
+                       (
+                         request.auth.uid in existing().participantUids ||
+                         (existing().status in ['OPEN', 'ACTIVE'] && existing().participantUids.size() < 4 && request.auth.uid in incoming().participantUids)
+                       );
+
+      allow delete: if isSignedIn() &&
+                       isValidId(raidId) &&
+                       existing().hostUid == request.auth.uid &&
+                       (existing().status == 'VICTORY' || existing().participantUids.size() <= 1);
+    }
+
+    // --- Collection: /guilds/{guildId} (Real-Player Step-Powered Guilds) ---
+    function isValidGuild(d) {
+      return d.name is string && d.name.size() >= 2 && d.name.size() <= 36 &&
+             d.motto is string && d.motto.size() <= 90 &&
+             d.emblemHex is int &&
+             isValidId(d.leaderUid) &&
+             d.leaderName is string && d.leaderName.size() >= 1 && d.leaderName.size() <= 50 &&
+             d.memberUids is list && d.memberUids.size() >= 1 && d.memberUids.size() <= 25 &&
+             d.memberNames is list && d.memberNames.size() == d.memberUids.size() &&
+             d.weekKey is string && d.weekKey.size() >= 4 && d.weekKey.size() <= 20 &&
+             intBound(d.weeklyGuildSteps, 0, 100000000) &&
+             intBound(d.weeklyStepGoal, 5000, 10000000) &&
+             intBound(d.weeklyBossDamage, 0, 100000000) &&
+             intBound(d.guildLevel, 1, 50) &&
+             d.publicVisible is bool &&
+             d.createdAt is timestamp && d.createdAt <= request.time &&
+             d.updatedAt is timestamp && d.updatedAt <= request.time;
+    }
+
+    function isValidGuildChatMessage(d) {
+      return isValidId(d.guildId) &&
+             isValidId(d.userId) &&
+             d.userId == request.auth.uid &&
+             d.displayName is string && d.displayName.size() >= 1 && d.displayName.size() <= 50 &&
+             intBound(d.heroLevel, 1, 999) &&
+             d.message is string && d.message.size() >= 1 && d.message.size() <= 240 &&
+             d.createdAt is timestamp && d.createdAt <= request.time;
+    }
+
+    match /guilds/{guildId} {
+      allow get: if isSignedIn() && isValidId(guildId);
+      allow list: if isSignedIn() && resource.data.publicVisible == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(guildId) &&
+                       incoming().leaderUid == request.auth.uid &&
+                       incoming().memberUids.size() == 1 &&
+                       incoming().memberUids[0] == request.auth.uid &&
+                       incoming().publicVisible == true &&
+                       incoming().keys().hasAll([
+                         'name', 'motto', 'emblemHex', 'leaderUid', 'leaderName',
+                         'memberUids', 'memberNames', 'weekKey', 'weeklyGuildSteps',
+                         'weeklyStepGoal', 'weeklyBossDamage', 'guildLevel',
+                         'publicVisible', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'name', 'motto', 'emblemHex', 'leaderUid', 'leaderName',
+                         'memberUids', 'memberNames', 'weekKey', 'weeklyGuildSteps',
+                         'weeklyStepGoal', 'weeklyBossDamage', 'guildLevel',
+                         'publicVisible', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidGuild(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(guildId) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'motto', 'memberUids', 'memberNames', 'leaderUid', 'leaderName',
+                         'weekKey', 'weeklyGuildSteps', 'weeklyStepGoal', 'weeklyBossDamage',
+                         'guildLevel', 'updatedAt'
+                       ]) &&
+                       isValidGuild(incoming()) &&
+                       (
+                         request.auth.uid in existing().memberUids ||
+                         (existing().memberUids.size() < 25 && request.auth.uid in incoming().memberUids)
+                       );
+
+      allow delete: if isSignedIn() &&
+                       isValidId(guildId) &&
+                       existing().leaderUid == request.auth.uid &&
+                       existing().memberUids.size() <= 1;
+
+      match /messages/{messageId} {
+        allow get, list: if isSignedIn() &&
+                            isValidId(guildId) &&
+                            request.auth.uid in get(/databases/$(database)/documents/guilds/$(guildId)).data.memberUids;
+
+        allow create: if isSignedIn() &&
+                         isValidId(guildId) &&
+                         isValidId(messageId) &&
+                         incoming().guildId == guildId &&
+                         request.auth.uid in get(/databases/$(database)/documents/guilds/$(guildId)).data.memberUids &&
+                         incoming().keys().hasAll([
+                           'guildId', 'userId', 'displayName', 'heroLevel', 'message', 'createdAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'guildId', 'userId', 'displayName', 'heroLevel', 'message', 'createdAt'
+                         ]) &&
+                         isValidGuildChatMessage(incoming());
+
+        allow update: if false;
+
+        allow delete: if isSignedIn() &&
+                         isValidId(guildId) &&
+                         isValidId(messageId) &&
+                         existing().userId == request.auth.uid;
+      }
     }
   }
 }

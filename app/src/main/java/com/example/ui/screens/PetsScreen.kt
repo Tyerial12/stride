@@ -21,8 +21,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
@@ -47,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,11 +67,15 @@ import com.example.R
 import com.example.data.model.HeroProfile
 import com.example.data.model.OwnedPet
 import com.example.data.model.PetCatalog
+import com.example.data.model.PetEvolutionBranch
 import com.example.data.model.PetFoodSpec
 import com.example.data.model.PetGearSpec
 import com.example.data.model.PetRarity
 import com.example.data.model.PetType
 import com.example.ui.components.ExpeditionLockBanner
+import com.example.ui.components.InteractivePetCareHabitatCard
+import com.example.ui.components.PetEvolutionTreeAtlas
+import com.example.ui.components.PetEvolutionTreeCard
 import com.example.ui.components.PetRarityBadge
 import com.example.ui.components.SolCoinBadge
 import com.example.ui.components.SolstrideCard
@@ -77,6 +84,7 @@ import com.example.ui.components.petRarityColorFor
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.LocalSolstrideColors
 import com.example.widget.WidgetSnapshotState
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 @Composable
@@ -89,11 +97,18 @@ fun PetsScreen(
     onJumpToExpedition: () -> Unit,
     onEquipPet: (PetType) -> Unit,
     onVisitTownPetStore: () -> Unit = {},
+    onPetCareAction: (OwnedPet, String) -> Unit = { _, _ -> },
+    onEvolvePet: (OwnedPet, PetEvolutionBranch) -> Unit = { _, _ -> },
     widgetSnapshot: WidgetSnapshotState = WidgetSnapshotState(),
     onPinPetWidget: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedRarityFilter by remember { mutableStateOf<PetRarity?>(null) }
+    var atlasFocusedPetType by remember(equippedPet?.petType) {
+        mutableStateOf(equippedPet?.resolvedType() ?: PetType.SUNFOX_KIT)
+    }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val ext = LocalSolstrideColors.current
     val ownedMap = remember(ownedPets) { ownedPets.associateBy { it.resolvedType() } }
     val filteredPets = remember(selectedRarityFilter) {
@@ -102,6 +117,7 @@ fun PetsScreen(
     }
 
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 104.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -192,6 +208,37 @@ fun PetsScreen(
             )
         }
 
+        // Interactive 3-Stage Branching Pet Evolution Tree Visualizer (all 6 pet species + 12 Apex abilities)
+        item(key = "evolution_tree_atlas") {
+            PetEvolutionTreeAtlas(
+                profile = profile,
+                ownedPets = ownedPets,
+                focusedPetType = atlasFocusedPetType,
+                onSelectPetType = { atlasFocusedPetType = it },
+                onVisitTownPetStore = onVisitTownPetStore
+            )
+        }
+
+        // Interactive Pet Care Habitat & Active Companion Evolution Trial Card
+        if (equippedPet != null) {
+            item {
+                InteractivePetCareHabitatCard(
+                    pet = equippedPet,
+                    petFoodCount = profile.solCoins,
+                    onPetCareAction = { actionType -> onPetCareAction(equippedPet, actionType) },
+                    onVisitPipsPetStore = onVisitTownPetStore
+                )
+            }
+            item {
+                PetEvolutionTreeCard(
+                    profile = profile,
+                    pet = equippedPet,
+                    onEvolvePet = onEvolvePet,
+                    onVisitPipsPetStore = onVisitTownPetStore
+                )
+            }
+        }
+
         // Rarity Tier Filter Strip
         item {
             LazyRow(
@@ -248,7 +295,12 @@ fun PetsScreen(
                 unlockFraction = unlock.progressFraction,
                 expeditionLocked = expeditionLocked,
                 onEquip = { onEquipPet(petType) },
-                onVisitTownPetStore = onVisitTownPetStore
+                onVisitTownPetStore = onVisitTownPetStore,
+                onInspectEvolutionTree = {
+                    atlasFocusedPetType = petType
+                    val targetIdx = if (expeditionLocked) 3 else 2
+                    scope.launch { listState.animateScrollToItem(targetIdx) }
+                }
             )
         }
 
@@ -311,7 +363,14 @@ private fun EquippedCompanionCard(
         ) {
             PetMedallionBadge(petType = type, sizeDp = 64)
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = type.displayName, style = MaterialTheme.typography.headlineMedium)
+                val form = equippedPet.resolvedForm()
+                Text(text = form.formName, style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    text = "Stage ${equippedPet.resolvedStage()} • ${form.title} (${equippedPet.resolvedBranch().label})",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(form.auraHex)
+                )
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -616,7 +675,8 @@ private fun CompanionRosterCard(
     unlockFraction: Float,
     expeditionLocked: Boolean,
     onEquip: () -> Unit,
-    onVisitTownPetStore: () -> Unit
+    onVisitTownPetStore: () -> Unit,
+    onInspectEvolutionTree: () -> Unit
 ) {
     val ext = LocalSolstrideColors.current
     val activeBonusText = if (ownedPet != null) {
@@ -777,6 +837,23 @@ private fun CompanionRosterCard(
                     Text("Locked — Complete Milestone First")
                 }
             }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        OutlinedButton(
+            onClick = onInspectEvolutionTree,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("inspect_tree_${petType.name.lowercase(Locale.US)}"),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f))
+        ) {
+            Icon(
+                imageVector = Icons.Filled.AccountTree,
+                contentDescription = "Inspect evolution tree",
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Inspect 3-Stage Evolution Tree & Apex Abilities")
         }
     }
 }

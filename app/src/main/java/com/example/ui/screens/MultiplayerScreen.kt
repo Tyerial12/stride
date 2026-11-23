@@ -57,7 +57,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.filled.Whatshot
+import com.example.data.model.CoopRaidRoom
 import com.example.data.model.DuelActionKind
+import com.example.data.model.GuildChatMessage
 import com.example.data.model.HeroProfile
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.MultiplayerChatMessage
@@ -66,14 +69,18 @@ import com.example.data.model.MultiplayerPetPlaydate
 import com.example.data.model.MultiplayerSubTab
 import com.example.data.model.OwnedPet
 import com.example.data.model.PetPlayActivity
+import com.example.data.model.SolstrideGuild
 import com.example.data.model.TownPresencePlayer
 import com.example.data.model.UiState
 import com.example.domain.ProgressionEngine
 import com.example.ui.components.ChatSenderMiniAvatar
+import com.example.ui.components.CoopRaidLobbyPanel
 import com.example.ui.components.MultiplayerDuelArenaCanvas
 import com.example.ui.components.MultiplayerHeroPetPreviewCanvas
 import com.example.ui.components.PetPlaydateParkCanvas
+import com.example.ui.components.SeasonalLeagueBanner
 import com.example.ui.components.SolstrideCard
+import com.example.ui.components.StepPoweredGuildPanel
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.LocalSolstrideColors
 
@@ -104,6 +111,20 @@ fun MultiplayerScreen(
     onFinishPetPlaydate: (MultiplayerPetPlaydate) -> Unit,
     onDismissPetPlaydate: (MultiplayerPetPlaydate) -> Unit,
     leaderboardState: UiState<List<LeaderboardEntry>> = UiState.Loading,
+    coopRaids: List<CoopRaidRoom> = emptyList(),
+    guilds: List<SolstrideGuild> = emptyList(),
+    myGuild: SolstrideGuild? = null,
+    guildChatMessages: List<GuildChatMessage> = emptyList(),
+    onCreateRaid: () -> Unit = {},
+    onJoinRaid: (String) -> Unit = {},
+    onStrikeRaid: (String, Boolean) -> Unit = { _, _ -> },
+    onClaimRaidReward: (String) -> Unit = {},
+    onCloseRaid: (String) -> Unit = {},
+    onCreateGuild: (String, String) -> Unit = { _, _ -> },
+    onJoinGuild: (String) -> Unit = {},
+    onLeaveGuild: () -> Unit = {},
+    onSendGuildMessage: (String) -> Unit = {},
+    onVisitTownMarketForCrest: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val ext = LocalSolstrideColors.current
@@ -177,6 +198,8 @@ fun MultiplayerScreen(
                     MultiplayerSubTab.CHAT -> ""
                     MultiplayerSubTab.DUELS -> if (activeDuelCount > 0) " ($activeDuelCount)" else ""
                     MultiplayerSubTab.PET_PLAY -> if (activePlayCount > 0) " ($activePlayCount)" else ""
+                    MultiplayerSubTab.GUILD -> if (myGuild != null) " ★" else ""
+                    MultiplayerSubTab.RAIDS -> if (coopRaids.isNotEmpty()) " (${coopRaids.size})" else ""
                     MultiplayerSubTab.RANKS -> ""
                 }
                 val icon = when (tab) {
@@ -184,6 +207,8 @@ fun MultiplayerScreen(
                     MultiplayerSubTab.CHAT -> Icons.AutoMirrored.Filled.Chat
                     MultiplayerSubTab.DUELS -> Icons.Filled.SportsMartialArts
                     MultiplayerSubTab.PET_PLAY -> Icons.Filled.Pets
+                    MultiplayerSubTab.GUILD -> Icons.Filled.Shield
+                    MultiplayerSubTab.RAIDS -> Icons.Filled.Whatshot
                     MultiplayerSubTab.RANKS -> Icons.Filled.EmojiEvents
                 }
                 FilterChip(
@@ -249,12 +274,56 @@ fun MultiplayerScreen(
                     onBrowsePlayers = { onSelectSubTab(MultiplayerSubTab.PLAYERS) }
                 )
 
-                MultiplayerSubTab.RANKS -> LeaderboardScreen(
-                    currentUserId = currentUserId,
-                    profile = profile,
-                    leaderboardState = leaderboardState,
-                    modifier = Modifier.fillMaxSize()
-                )
+                MultiplayerSubTab.GUILD -> LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 96.dp)
+                ) {
+                    item {
+                        StepPoweredGuildPanel(
+                            profile = profile,
+                            guilds = guilds,
+                            myGuild = myGuild,
+                            guildMessages = guildChatMessages,
+                            onCreateGuild = onCreateGuild,
+                            onJoinGuild = onJoinGuild,
+                            onLeaveGuild = onLeaveGuild,
+                            onSendGuildMessage = onSendGuildMessage,
+                            onVisitTownMarketForCrest = onVisitTownMarketForCrest
+                        )
+                    }
+                }
+
+                MultiplayerSubTab.RAIDS -> LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 96.dp)
+                ) {
+                    item {
+                        CoopRaidLobbyPanel(
+                            profile = profile,
+                            raids = coopRaids,
+                            onCreateRaid = onCreateRaid,
+                            onJoinRaid = onJoinRaid,
+                            onStrikeRaid = onStrikeRaid,
+                            onClaimRaidReward = onClaimRaidReward,
+                            onCloseRaid = onCloseRaid
+                        )
+                    }
+                }
+
+                MultiplayerSubTab.RANKS -> Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    SeasonalLeagueBanner(profile = profile)
+                    LeaderboardScreen(
+                        currentUserId = currentUserId,
+                        profile = profile,
+                        leaderboardState = leaderboardState,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    )
+                }
             }
         }
     }

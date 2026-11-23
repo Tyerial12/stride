@@ -151,6 +151,7 @@ enum class ClassSpecialization(
     val title: String,
     val affinity: ElementalAffinity,
     val unlockLevel: Int,
+    val classTier: Int = 2,
     val passiveSummary: String,
     val ultimateName: String,
     val ultimateDescription: String,
@@ -279,6 +280,7 @@ enum class ClassSpecialization(
         title = "Eclipse Void Inquisitor",
         affinity = ElementalAffinity.VOID,
         unlockLevel = 3,
+        classTier = 2,
         passiveSummary = "+16% Lifesteal, +12% ATK & Soul-Drain Barrier",
         ultimateName = "Void Judgement Nova",
         ultimateDescription = "300% Void DMG + drains 35% of damage dealt as Hero HP & Aegis Shield",
@@ -288,14 +290,239 @@ enum class ClassSpecialization(
         lifestealBonusPct = 16,
         pierceBonusPct = 12,
         regenBonusHp = 8
+    ),
+    // --- TIER III: APEX ASCENDANT CLASSES (Unlocks at Level 10) ---
+    SOLAR_TEMPLAR_ARCHON(
+        id = "SOLAR_TEMPLAR_ARCHON",
+        baseClass = HeroClass.VANGUARD,
+        title = "Solar Templar Archon",
+        affinity = ElementalAffinity.SOLAR,
+        unlockLevel = 10,
+        classTier = 3,
+        passiveSummary = "+26% DEF, +22% ATK, +20 Turn Regen & Unbreakable Sun-Aegis",
+        ultimateName = "Helios Citadel Verdict",
+        ultimateDescription = "380% Solar DMG + 50% Max HP Aegis Barrier, Sunder & 1-turn Stun",
+        atkMultBonus = 0.22f,
+        defMultBonus = 0.26f,
+        critBonusPct = 10,
+        lifestealBonusPct = 6,
+        pierceBonusPct = 16,
+        regenBonusHp = 20
+    ),
+    TITANBREAKER_WARLORD(
+        id = "TITANBREAKER_WARLORD",
+        baseClass = HeroClass.VANGUARD,
+        title = "Titanbreaker Warlord",
+        affinity = ElementalAffinity.TERRA,
+        unlockLevel = 10,
+        classTier = 3,
+        passiveSummary = "+28% ATK, +25% Armor Pierce, +18% DEF & Crushing Quake",
+        ultimateName = "Worldbreaker Tectonic Slam",
+        ultimateDescription = "410% Terra DMG + shatters 100% Enemy Shield, Stuns & Sunders",
+        atkMultBonus = 0.28f,
+        defMultBonus = 0.18f,
+        critBonusPct = 12,
+        lifestealBonusPct = 8,
+        pierceBonusPct = 25,
+        regenBonusHp = 12
+    ),
+    CELESTIAL_ARCHMAGE(
+        id = "CELESTIAL_ARCHMAGE",
+        baseClass = HeroClass.ARCANIST,
+        title = "Celestial Pyre Archmage",
+        affinity = ElementalAffinity.EMBER,
+        unlockLevel = 10,
+        classTier = 3,
+        passiveSummary = "+32% ATK, +16% Crit & Twin-Star Elemental Overdrive",
+        ultimateName = "Hypernova Starfall Cataclysm",
+        ultimateDescription = "430% Ember DMG + 4-turn Scorching Burn, Sunder & +25 Valor refund",
+        atkMultBonus = 0.32f,
+        defMultBonus = 0.10f,
+        critBonusPct = 16,
+        lifestealBonusPct = 10,
+        pierceBonusPct = 20,
+        regenBonusHp = 10
+    ),
+    ABYSSAL_CHRONOMANCER(
+        id = "ABYSSAL_CHRONOMANCER",
+        baseClass = HeroClass.ARCANIST,
+        title = "Abyssal Chronomancer",
+        affinity = ElementalAffinity.VOID,
+        unlockLevel = 10,
+        classTier = 3,
+        passiveSummary = "+24% ATK, +22% Lifesteal, +16% DEF & Time-Rift Siphon",
+        ultimateName = "Singularity Chrono-Collapse",
+        ultimateDescription = "395% Void DMG + 1-turn Stun, Poison & drains 40% damage as HP/Barrier",
+        atkMultBonus = 0.24f,
+        defMultBonus = 0.16f,
+        critBonusPct = 14,
+        lifestealBonusPct = 22,
+        pierceBonusPct = 20,
+        regenBonusHp = 14
+    ),
+    STARFALL_DEADEYE(
+        id = "STARFALL_DEADEYE",
+        baseClass = HeroClass.RANGER,
+        title = "Starfall Deadeye Sovereign",
+        affinity = ElementalAffinity.FROST,
+        unlockLevel = 10,
+        classTier = 3,
+        passiveSummary = "+26% ATK, +22% Crit Chance, +20% Pierce & Glacial Hailstorm",
+        ultimateName = "Absolute Zero Star-Volley",
+        ultimateDescription = "425% Guaranteed-Crit Frost DMG + 3-turn Frostbite & Sunder",
+        atkMultBonus = 0.26f,
+        defMultBonus = 0.12f,
+        critBonusPct = 22,
+        lifestealBonusPct = 8,
+        pierceBonusPct = 20,
+        regenBonusHp = 10
+    ),
+    VERDANT_BEASTMASTER(
+        id = "VERDANT_BEASTMASTER",
+        baseClass = HeroClass.RANGER,
+        title = "Primeval Horizon Warden",
+        affinity = ElementalAffinity.TERRA,
+        unlockLevel = 10,
+        classTier = 3,
+        passiveSummary = "+22% ATK, +22% DEF, +18 Turn Regen & Companion Bond Surge",
+        ultimateName = "Gaia's Wrath & Pack Hunt",
+        ultimateDescription = "390% Terra DMG + 1-turn Stun, +30% Max HP Heal & +50% Pet Burst",
+        atkMultBonus = 0.22f,
+        defMultBonus = 0.22f,
+        critBonusPct = 14,
+        lifestealBonusPct = 12,
+        pierceBonusPct = 16,
+        regenBonusHp = 18
+    ),
+    PHANTOM_SHOGUN(
+        id = "PHANTOM_SHOGUN",
+        baseClass = HeroClass.SHADOWBLADE,
+        title = "Eclipse Phantom Shogun",
+        affinity = ElementalAffinity.VOID,
+        unlockLevel = 10,
+        classTier = 3,
+        passiveSummary = "+30% ATK, +28% Armor Pierce, +18% Lifesteal & Shadow Clone",
+        ultimateName = "Dimensional Severance",
+        ultimateDescription = "440% Guaranteed-Crit Void DMG + Lethal Poison, Sunder & 30% Leech",
+        atkMultBonus = 0.30f,
+        defMultBonus = 0.08f,
+        critBonusPct = 18,
+        lifestealBonusPct = 18,
+        pierceBonusPct = 28,
+        regenBonusHp = 6
+    ),
+    CRIMSON_DERVISH(
+        id = "CRIMSON_DERVISH",
+        baseClass = HeroClass.SHADOWBLADE,
+        title = "Ashen Hellblade Dervish",
+        affinity = ElementalAffinity.EMBER,
+        unlockLevel = 10,
+        classTier = 3,
+        passiveSummary = "+32% ATK, +20% Crit, +20% Pierce & Blazing Cyclone",
+        ultimateName = "Infernal Dance of Ten Thousand Blades",
+        ultimateDescription = "435% Ember DMG + 4-turn Scorch Burn, Armor Sunder & +2 Combo",
+        atkMultBonus = 0.32f,
+        defMultBonus = 0.10f,
+        critBonusPct = 20,
+        lifestealBonusPct = 14,
+        pierceBonusPct = 20,
+        regenBonusHp = 8
+    ),
+    // --- TIER IV: MYTHIC PARAGON CLASSES (Unlocks at Level 18 or Prestige I+) ---
+    IMMORTAL_SUNKING(
+        id = "IMMORTAL_SUNKING",
+        baseClass = HeroClass.VANGUARD,
+        title = "Immortal Sun-King Paragon",
+        affinity = ElementalAffinity.SOLAR,
+        unlockLevel = 18,
+        classTier = 4,
+        passiveSummary = "+38% ATK, +38% DEF, +28 Turn Regen & Divine Solar Invulnerability",
+        ultimateName = "Dawn of the Eternal Sovereign",
+        ultimateDescription = "500% Solar & Terra DMG + 60% Max HP Aegis Barrier, Stun & Full Cleanse",
+        atkMultBonus = 0.38f,
+        defMultBonus = 0.38f,
+        critBonusPct = 16,
+        lifestealBonusPct = 12,
+        pierceBonusPct = 26,
+        regenBonusHp = 28
+    ),
+    ASTRAL_GODWEAVER(
+        id = "ASTRAL_GODWEAVER",
+        baseClass = HeroClass.ARCANIST,
+        title = "Astral Omnimancer Paragon",
+        affinity = ElementalAffinity.EMBER,
+        unlockLevel = 18,
+        classTier = 4,
+        passiveSummary = "+45% ATK, +22% Crit, +24% Lifesteal & Cosmic Spellweaving",
+        ultimateName = "Genesis Big-Bang Cataclysm",
+        ultimateDescription = "540% Prismatic Elemental DMG + Burn, Poison, Sunder & 35% Heal",
+        atkMultBonus = 0.45f,
+        defMultBonus = 0.20f,
+        critBonusPct = 22,
+        lifestealBonusPct = 24,
+        pierceBonusPct = 30,
+        regenBonusHp = 18
+    ),
+    HORIZON_SOVEREIGN(
+        id = "HORIZON_SOVEREIGN",
+        baseClass = HeroClass.RANGER,
+        title = "Celestial Horizon Windlord",
+        affinity = ElementalAffinity.FROST,
+        unlockLevel = 18,
+        classTier = 4,
+        passiveSummary = "+40% ATK, +28% Crit, +28% Pierce & Omniscient Sky-Barrage",
+        ultimateName = "Firmament Shattering Arrow",
+        ultimateDescription = "525% Guaranteed-Crit Frost DMG + Stun, Frostbite & +40% Pet Burst",
+        atkMultBonus = 0.40f,
+        defMultBonus = 0.24f,
+        critBonusPct = 28,
+        lifestealBonusPct = 16,
+        pierceBonusPct = 28,
+        regenBonusHp = 20
+    ),
+    VOID_EMPEROR_BLADE(
+        id = "VOID_EMPEROR_BLADE",
+        baseClass = HeroClass.SHADOWBLADE,
+        title = "Eclipse Void-Emperor Assassin",
+        affinity = ElementalAffinity.VOID,
+        unlockLevel = 18,
+        classTier = 4,
+        passiveSummary = "+44% ATK, +35% Armor Pierce, +25% Lifesteal & True Execution",
+        ultimateName = "Oblivion End-of-Days Slash",
+        ultimateDescription = "550% Guaranteed-Crit Void DMG + Sunder, Poison, Stun & 40% Leech",
+        atkMultBonus = 0.44f,
+        defMultBonus = 0.18f,
+        critBonusPct = 25,
+        lifestealBonusPct = 25,
+        pierceBonusPct = 35,
+        regenBonusHp = 14
     );
 
     val ultimateSummary: String
         get() = ultimateDescription
 
+    val tierRoman: String
+        get() = when (classTier) {
+            2 -> "TIER II"
+            3 -> "TIER III"
+            4 -> "TIER IV"
+            else -> "TIER I"
+        }
+
+    val tierName: String
+        get() = when (classTier) {
+            2 -> "Tier II • Advanced Specialization (Lv.3)"
+            3 -> "Tier III • Apex Ascendant Class (Lv.10)"
+            4 -> "Tier IV • Mythic Paragon Class (Lv.18 / Prestige)"
+            else -> "Tier I • Base Class"
+        }
+
+    fun isUnlockedFor(profile: HeroProfile): Boolean =
+        profile.level >= unlockLevel.toLong() || (classTier < 4 && profile.prestigeLevel >= 1L) || (classTier == 4 && (profile.level >= 18L || profile.prestigeLevel >= 2L))
+
     companion object {
         fun forClass(heroClass: HeroClass): List<ClassSpecialization> =
-            entries.filter { it.baseClass == heroClass }
+            entries.filter { it.baseClass == heroClass }.sortedBy { it.classTier }
 
         fun fromIdOrDefault(id: String, heroClass: HeroClass): ClassSpecialization {
             val matched = entries.firstOrNull { (it.id == id || it.name == id) && it.baseClass == heroClass }
@@ -530,8 +757,63 @@ data class HardcoreRpgState(
     val shrineBattlesLeft: Int = 0,
     val itemDurabilityMap: Map<String, Int> = emptyMap(),
     val bestiaryDefeatsMap: Map<String, Int> = emptyMap(),
-    val unlockedRunesMap: Map<String, Int> = emptyMap()
+    val unlockedRunesMap: Map<String, Int> = emptyMap(),
+    val activityMasteryXpMap: Map<String, Int> = emptyMap(),
+    val collectedRelicIds: Set<String> = emptySet(),
+    val wildsHarvestedKeys: Set<String> = emptySet(),
+    val relaxedTimingAssist: Boolean = false,
+    // Step & Sleep Real-Life RPG Expansion State
+    val heroStamina: Int = 85,
+    val maxHeroStamina: Int = 100,
+    val activeDreamTierId: String = DreamRestTier.RESTORATIVE_SLUMBER.id,
+    val lastSleepDurationMinutes: Int = 390,
+    val lastSanctuaryRestDateKey: String = "",
+    val dreamShards: Long = 3L,
+    val agilityStat: Int = 5,
+    val perceptionStat: Int = 5,
+    val constellationRanksMap: Map<String, Int> = emptyMap(),
+    val itemAffixMap: Map<String, String> = emptyMap(),
+    val activeDungeonId: String = "dungeon_sunstone_catacombs",
+    val activeDungeonRoomIndex: Int = 0,
+    val activeDungeonRoomSteps: Int = 0,
+    val dungeonClearsCount: Int = 0,
+    val slayerContractStepsMap: Map<String, Int> = emptyMap(),
+    val slayerContractKillsMap: Map<String, Int> = emptyMap(),
+    val slayerContractsCompleted: Int = 0
 ) {
+    fun activeDreamTier(): DreamRestTier =
+        DreamRestTier.fromId(activeDreamTierId)
+
+    fun constellationRank(nodeId: String): Int =
+        (constellationRanksMap[nodeId] ?: 0).coerceIn(0, 5)
+
+    fun totalConstellationRanks(): Int =
+        constellationRanksMap.values.sum()
+
+    fun affixesForItem(itemId: String): Pair<GearAffixSpec?, GearAffixSpec?> =
+        GearAffixCatalog.parsePair(itemAffixMap[itemId])
+
+    fun activeDungeon(): StepDungeonSpec =
+        StepDungeonCatalog.fromId(activeDungeonId)
+
+    fun activeDungeonChamber(): DungeonChamberNode {
+        val dungeon = activeDungeon()
+        val idx = activeDungeonRoomIndex.coerceIn(0, dungeon.chambers.lastIndex)
+        return dungeon.chambers[idx]
+    }
+
+    fun effectiveChamberStepsRequired(chamber: DungeonChamberNode = activeDungeonChamber()): Int {
+        val corridorRank = constellationRank("strider_corridor")
+        val reductionMult = (1.0f - corridorRank * 0.06f).coerceIn(0.60f, 1.0f)
+        return (chamber.stepsRequired * reductionMult).roundToInt().coerceAtLeast(100)
+    }
+
+    fun ComputedMaxStamina(endurance: Long): Int {
+        val reservoirRank = constellationRank("dream_reservoir")
+        val apexRank = constellationRank("strider_apex")
+        return (100 + (endurance.toInt() - 5).coerceAtLeast(0) * 4 + (reservoirRank * 8) + (apexRank * 5)).coerceIn(80, 350)
+    }
+
     fun durabilityFor(itemId: String): Int {
         if (itemId.isBlank()) return 100
         return (itemDurabilityMap[itemId] ?: 100).coerceIn(0, 100)
@@ -540,10 +822,37 @@ data class HardcoreRpgState(
     fun codexTotalKills(): Int = bestiaryDefeatsMap.values.sum()
 
     fun codexBonusAtkPct(): Int = (bestiaryDefeatsMap.count { it.value >= 1 } * 2) +
-        (bestiaryDefeatsMap.count { it.value >= 5 } * 3)
+        (bestiaryDefeatsMap.count { it.value >= 5 } * 3) +
+        (bestiaryDefeatsMap.count { it.value >= 12 } * 4)
 
     fun codexBonusHpPct(): Int = (bestiaryDefeatsMap.count { it.value >= 1 } * 2) +
-        (bestiaryDefeatsMap.count { it.value >= 10 } * 4)
+        (bestiaryDefeatsMap.count { it.value >= 10 } * 4) +
+        (bestiaryDefeatsMap.count { it.value >= 25 } * 5)
+
+    fun masteryXp(type: ActivityMasteryType): Int =
+        (activityMasteryXpMap[type.id] ?: 0).coerceAtLeast(0)
+
+    fun masteryLevel(type: ActivityMasteryType): Int =
+        ActivityMasteryType.levelForXp(masteryXp(type))
+
+    fun relicSetBonuses(): Triple<Int, Int, Pair<Int, Int>> {
+        var atk = 0
+        var def = 0
+        var hp = 0
+        var crit = 0
+        RelicSetSpec.entries.forEach { set ->
+            val owned = set.pieces.count { it in collectedRelicIds }
+            if (owned >= 2) {
+                atk += set.twoPieceAtkPct
+                def += set.twoPieceDefPct
+            }
+            if (owned >= 4) {
+                hp += set.fourPieceHpPct
+                crit += set.fourPieceCritPct
+            }
+        }
+        return Triple(atk, def, hp to crit)
+    }
 
     fun bestiaryKills(bossKey: String): Int =
         (bestiaryDefeatsMap[bossKey] ?: 0).coerceAtLeast(0)
@@ -613,6 +922,15 @@ data class HeroProfile(
     val dailyChestsOpened: Long = 0L,
     val claimedQuestIds: List<String> = emptyList(),
     val chestsOpenedTotal: Long = 0L,
+    val migrationVersion: Long = 0L,
+    val guildId: String = "",
+    val seasonKey: String = SeasonCatalog.CURRENT_SEASON_KEY,
+    val seasonXp: Long = 0L,
+    val claimedSeasonTiers: List<Long> = emptyList(),
+    val townBuildingLevels: String = DEFAULT_TOWN_BUILDING_LEVELS,
+    val evolutionShards: Long = 0L,
+    val mythicCores: Long = 0L,
+    val guildCrestsOwned: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
@@ -956,7 +1274,51 @@ fun computeDerivedStats(
     critPct += realmFogState.fogCritBonusPct
     expWardPct += realmFogState.restedExpeditionWardBonusPct
 
-    // Apply Specialization, Skill Tree, Title, Codex & Mercenary bonuses
+    // Apply Specialization, Skill Tree, Title, Codex, Town Buildings, Masteries, Relic Sets & Mercenary bonuses
+    val townBonus = TownBuildingCatalog.computeBonuses(profile)
+    val (relicAtkPct, relicDefPct, relicHpCrit) = hardcoreState.relicSetBonuses()
+    val (relicHpPct, relicCritPct) = relicHpCrit
+    val combatMasteryAbove = (hardcoreState.masteryLevel(ActivityMasteryType.COMBAT) - 1).coerceAtLeast(0)
+    val smithingMasteryAbove = (hardcoreState.masteryLevel(ActivityMasteryType.SMITHING) - 1).coerceAtLeast(0)
+    val alchemyMasteryAbove = (hardcoreState.masteryLevel(ActivityMasteryType.ALCHEMY) - 1).coerceAtLeast(0)
+    val exploreMasteryAbove = (hardcoreState.masteryLevel(ActivityMasteryType.EXPLORATION) - 1).coerceAtLeast(0)
+
+    // Constellation Talent Ranks, Extended Attributes (Agility & Perception), Gear Affixes & Dream Rest Tier
+    val dreamTier = hardcoreState.activeDreamTier()
+    val striderPaceRank = hardcoreState.constellationRank("strider_pace")
+    val striderCorridorRank = hardcoreState.constellationRank("strider_corridor")
+    val striderExpRank = hardcoreState.constellationRank("strider_expedition")
+    val striderApexRank = hardcoreState.constellationRank("strider_apex")
+    val dawnPrecisionRank = hardcoreState.constellationRank("dawn_precision")
+    val dawnRiposteRank = hardcoreState.constellationRank("dawn_riposte")
+    val dawnSunderRank = hardcoreState.constellationRank("dawn_sunder")
+    val dawnApexRank = hardcoreState.constellationRank("dawn_apex")
+    val dreamReservoirRank = hardcoreState.constellationRank("dream_reservoir")
+    val dreamHarmonyRank = hardcoreState.constellationRank("dream_harmony")
+    val dreamAuraRank = hardcoreState.constellationRank("dream_aura")
+    val dreamApexRank = hardcoreState.constellationRank("dream_apex")
+
+    val agilityAboveBase = (hardcoreState.agilityStat - 5).coerceAtLeast(0)
+    val perceptionAboveBase = (hardcoreState.perceptionStat - 5).coerceAtLeast(0)
+
+    var affixAtkPct = 0
+    var affixDefPct = 0
+    var affixHpPct = 0
+    var affixCritPct = 0
+    var affixPiercePct = 0
+    var affixStepEnergyPct = 0
+    equipped.forEach { item ->
+        val (pre, suf) = hardcoreState.affixesForItem(item.id)
+        listOfNotNull(pre, suf).forEach { af ->
+            affixAtkPct += af.atkPct
+            affixDefPct += af.defPct
+            affixHpPct += af.hpPct
+            affixCritPct += af.critPct
+            affixPiercePct += af.piercePct
+            affixStepEnergyPct += af.stepEnergyPct
+        }
+    }
+
     val specUnlocked = profile.level >= spec.unlockLevel
     if (specUnlocked) {
         critPct += spec.critBonusPct
@@ -965,24 +1327,29 @@ fun computeDerivedStats(
         turnRegen += spec.regenBonusHp
     }
 
-    critPct = (critPct + skillBonus.critChancePct + setBonus.critBonusPct + title.critPct + mercenary.critBonusPct)
-        .coerceIn(5, 85)
-    piercePct = (piercePct + skillBonus.armorPiercePct).coerceIn(0, 75)
-    lifestealPct = (lifestealPct + skillBonus.lifestealPct).coerceIn(0, 50)
-    solarSurgePct = (solarSurgePct + skillBonus.solarSurgePct).coerceIn(0, 200)
-    dmgRedPct = (dmgRedPct + skillBonus.damageReductionPct).coerceIn(0, 65)
+    critPct = (critPct + skillBonus.critChancePct + setBonus.critBonusPct + title.critPct + mercenary.critBonusPct +
+        townBonus.critPct + relicCritPct + combatMasteryAbove +
+        (dawnPrecisionRank * 2) + affixCritPct + dreamTier.bonusCritPct + agilityAboveBase)
+        .coerceIn(5, 88)
+    piercePct = (piercePct + skillBonus.armorPiercePct + (dawnSunderRank * 3) + affixPiercePct + perceptionAboveBase).coerceIn(0, 82)
+    lifestealPct = (lifestealPct + skillBonus.lifestealPct + (dawnSunderRank * 2)).coerceIn(0, 55)
+    solarSurgePct = (solarSurgePct + skillBonus.solarSurgePct + (dawnApexRank * 8)).coerceIn(0, 240)
+    dmgRedPct = (dmgRedPct + skillBonus.damageReductionPct + (dawnRiposteRank * 2)).coerceIn(0, 68)
     thornsPct = (thornsPct + skillBonus.thornsPct).coerceIn(0, 90)
-    expWardPct = expWardPct.coerceIn(0, 60)
-    turnRegen = (turnRegen + skillBonus.turnRegenHp).coerceIn(0, 300)
+    expWardPct = (expWardPct + (striderExpRank * 3) + perceptionAboveBase).coerceIn(0, 70)
+    turnRegen = (turnRegen + skillBonus.turnRegenHp + (dreamReservoirRank * 4)).coerceIn(0, 350)
 
     val rawAtk = 12 + (profile.might.toInt() * 3) + (profile.level.toInt() * 2) +
-        atkGear + petBonus.flatAttack + skillBonus.flatAttack
+        atkGear + petBonus.flatAttack + skillBonus.flatAttack +
+        (striderCorridorRank * 4) + (dawnPrecisionRank * 5) + (agilityAboveBase * 2)
     val rawDef = 8 + (profile.vigor.toInt() * 2) + profile.level.toInt() +
-        defGear + petBonus.flatDefense + skillBonus.flatDefense
+        defGear + petBonus.flatDefense + skillBonus.flatDefense + (perceptionAboveBase * 2)
 
     val classDefMult = if (heroClass == HeroClass.VANGUARD) 1.15f else 1.0f
-    val setAtkMult = 1.0f + (setBonus.attackPctBonus / 100f)
-    val setDefMult = 1.0f + (setBonus.defensePctBonus / 100f)
+    val constellationAtkPct = (striderApexRank * 4) + (if (hardcoreState.heroStamina >= 50) dreamApexRank * 6 else 0)
+    val constellationDefPct = (striderApexRank * 4) + (dawnRiposteRank * 4) + (if (hardcoreState.heroStamina >= 50) dreamApexRank * 6 else 0)
+    val setAtkMult = 1.0f + ((setBonus.attackPctBonus + townBonus.atkPct + relicAtkPct + combatMasteryAbove * 2 + affixAtkPct + constellationAtkPct) / 100f)
+    val setDefMult = 1.0f + ((setBonus.defensePctBonus + relicDefPct + smithingMasteryAbove * 2 + affixDefPct + constellationDefPct) / 100f)
     val specAtkMult = if (specUnlocked) 1.0f + spec.atkMultBonus else 1.0f
     val specDefMult = if (specUnlocked) 1.0f + spec.defMultBonus else 1.0f
     val titleAtkMult = 1.0f + (title.atkPct / 100f) + (hardcoreState.codexBonusAtkPct() / 100f)
@@ -1005,29 +1372,36 @@ fun computeDerivedStats(
     )
 
     val rawMaxHp = 110 + (profile.vigor.toInt() * 10) + (profile.level.toInt() * 12) +
-        hpGear + petBonus.flatMaxHp + skillBonus.flatMaxHp
-    val titleHpMult = 1.0f + (title.hpPct / 100f) + (hardcoreState.codexBonusHpPct() / 100f)
+        hpGear + petBonus.flatMaxHp + skillBonus.flatMaxHp +
+        (dawnApexRank * 25) + (dreamAuraRank * 18)
+    val titleHpMult = 1.0f + ((title.hpPct + hardcoreState.codexBonusHpPct() + townBonus.hpPct + relicHpPct + alchemyMasteryAbove * 2 + affixHpPct + (striderApexRank * 4)) / 100f)
     val maxHp = max(
         60,
         (rawMaxHp * petBonus.maxHpMultiplier * titleHpMult * skillBonus.prestigeStatMultiplier * woundMult).roundToInt()
     )
     val maxEnergy = max(
         60,
-        85 + (profile.endurance.toInt() * 5) + energyGear + petBonus.flatMaxEnergy + skillBonus.flatMaxEnergy
+        85 + (profile.endurance.toInt() * 5) + energyGear + petBonus.flatMaxEnergy + skillBonus.flatMaxEnergy +
+            (striderApexRank * 6) + (dreamApexRank * 5)
     )
 
     val rawGearPower = equipped.sumOf { it.gearPowerScore(hardcoreState.durabilityFor(it.id)) } +
-        (setBonus.attackPctBonus * 4)
+        (setBonus.attackPctBonus * 4) + (hardcoreState.itemAffixMap.size * 12)
 
     val power = (totalAtk * 5) + (totalDef * 4) + maxHp + (profile.level.toInt() * 25) +
         (critPct * 2) + (piercePct * 2) + (dmgRedPct * 3) + (expWardPct * 2) +
-        (profile.prestigeLevel.toInt() * 120)
+        (profile.prestigeLevel.toInt() * 120) + (townBonus.totalBuildingRank * 10) +
+        (hardcoreState.totalConstellationRanks() * 18)
 
     val activeElement = runeElement ?: if (specUnlocked) spec.affinity else heroClass.defaultAffinity
     val mercSummary = if (mercenary != MercenaryContractSpec.NONE && hardcoreState.mercenaryBattlesLeft > 0) {
         "${mercenary.title} (${hardcoreState.mercenaryBattlesLeft}B left)"
     } else ""
-    val codexSummary = "+${hardcoreState.codexBonusAtkPct()}% ATK, +${hardcoreState.codexBonusHpPct()}% Max HP (${hardcoreState.codexTotalKills()} Boss Kills)"
+    val codexSummary = "+${hardcoreState.codexBonusAtkPct()}% ATK, +${hardcoreState.codexBonusHpPct()}% Max HP (${hardcoreState.codexTotalKills()} Kills)"
+
+    val stepEnergyConstellationMult = 1.0f + ((striderPaceRank * 6 + affixStepEnergyPct) / 100f)
+    val xpConstellationMult = 1.0f + ((dreamHarmonyRank * 5 + dreamTier.bonusXpPct) / 100f)
+    val shardConstellationMult = 1.0f + ((dreamAuraRank * 5) / 100f)
 
     return DerivedHeroStats(
         totalAttack = totalAtk,
@@ -1044,9 +1418,9 @@ fun computeDerivedStats(
         thornsPercent = thornsPct,
         expeditionWardPercent = expWardPct,
         turnRegenHp = turnRegen,
-        stepEnergyMultiplier = petBonus.stepEnergyMultiplier * skillBonus.stepEnergyMultiplier,
-        totalXpMultiplier = petBonus.xpMultiplier * skillBonus.xpMultiplier * skillBonus.prestigeRewardMultiplier * (1.0f + realmFogState.restedXpBonusPct / 100f),
-        totalSunshardMultiplier = petBonus.sunshardMultiplier * skillBonus.sunshardMultiplier * skillBonus.prestigeRewardMultiplier,
+        stepEnergyMultiplier = petBonus.stepEnergyMultiplier * skillBonus.stepEnergyMultiplier * (1.0f + exploreMasteryAbove * 0.02f) * dreamTier.stepEnergyMultiplier * stepEnergyConstellationMult,
+        totalXpMultiplier = petBonus.xpMultiplier * skillBonus.xpMultiplier * skillBonus.prestigeRewardMultiplier * (1.0f + (realmFogState.restedXpBonusPct + townBonus.xpBonusPct) / 100f) * xpConstellationMult,
+        totalSunshardMultiplier = petBonus.sunshardMultiplier * skillBonus.sunshardMultiplier * skillBonus.prestigeRewardMultiplier * (1.0f + (townBonus.sunshardBonusPct + exploreMasteryAbove * 2) / 100f) * shardConstellationMult,
         setBonus = setBonus,
         petBonusSummary = petBonus.summaryText,
         activeElement = activeElement,

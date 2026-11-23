@@ -187,12 +187,14 @@ class WidgetAutoSyncWorker(
             } ?: false)
 
             val sleepSnapshot = runCatching {
-                com.example.wear.HealthConnectStepReader(appContext, preferences).readWatchSleepSnapshot()
+                com.example.wear.HealthConnectStepReader(appContext, preferences)
+                    .readWatchSleepSnapshot(watchConnected = isWatchConnected)
             }.getOrNull()
             val manuallyWokenMarker = preferences.readManuallyWokenSleepMs()
-            val isHeroSleeping = sleepSnapshot?.isSleepingNow == true &&
+            val isHeroSleeping = isWatchConnected &&
+                sleepSnapshot?.isSleepingNow == true &&
                 (sleepSnapshot.activeSessionMarkerMs == 0L || sleepSnapshot.activeSessionMarkerMs != manuallyWokenMarker)
-            val sleepSource = sleepSnapshot?.sleepSourceLabel.orEmpty()
+            val sleepSource = if (isWatchConnected) sleepSnapshot?.sleepSourceLabel.orEmpty() else ""
 
             SolstrideWidgetSnapshotStore.rechargeWildStaminaAndTreats(appContext, todaySteps)
 
