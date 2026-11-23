@@ -338,20 +338,39 @@ class SolstridePetWidgetProvider : BaseSolstrideWidgetProvider() {
         fun buildRemoteViews(context: Context, snapshot: WidgetSnapshotState): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget_solstride_pet)
             val locked = snapshot.isAppForegroundLocked
+            val remainingCare = snapshot.remainingDailyCare()
+            val bonusCare = snapshot.petBonusCareCharges.coerceAtLeast(0)
+            val dailyCap = snapshot.petDailyCareLimit.coerceAtLeast(1)
+            val dailyExhausted = snapshot.isDailyCareExhausted()
+            val careLabel = if (bonusCare > 0) "$remainingCare/$dailyCap+$bonusCare★" else "$remainingCare/$dailyCap"
 
-            if (locked) {
-                views.setViewVisibility(R.id.pet_lock_banner, View.VISIBLE)
-                views.setTextViewText(
-                    R.id.pet_lock_banner,
-                    "🔒 APP OPEN — Close Solstride to Feed or Fight Wild Pets"
-                )
-            } else {
-                views.setViewVisibility(R.id.pet_lock_banner, View.GONE)
+            when {
+                dailyExhausted -> {
+                    views.setViewVisibility(R.id.pet_lock_banner, View.VISIBLE)
+                    views.setTextViewText(
+                        R.id.pet_lock_banner,
+                        "🌙 DAILY LIMIT ($dailyCap/$dailyCap) — Resets Tomorrow!"
+                    )
+                }
+                locked -> {
+                    views.setViewVisibility(R.id.pet_lock_banner, View.VISIBLE)
+                    views.setTextViewText(
+                        R.id.pet_lock_banner,
+                        "🔒 APP OPEN — Close Solstride to Care ($careLabel Left)"
+                    )
+                }
+                else -> {
+                    views.setViewVisibility(R.id.pet_lock_banner, View.GONE)
+                }
             }
 
             views.setTextViewText(
                 R.id.pet_stamina_badge,
-                "⚡ ${snapshot.petWildStamina}/${WildPetBattleEngine.MAX_WILD_STAMINA}"
+                if (snapshot.hasPet) {
+                    "⚡ ${snapshot.petWildStamina}/${WildPetBattleEngine.MAX_WILD_STAMINA} • $careLabel"
+                } else {
+                    "⚡ ${snapshot.petWildStamina}/${WildPetBattleEngine.MAX_WILD_STAMINA}"
+                }
             )
 
             if (snapshot.hasPet) {
@@ -362,7 +381,7 @@ class SolstridePetWidgetProvider : BaseSolstrideWidgetProvider() {
                 val rarityPrefix = if (snapshot.petRarityLabel.isNotBlank()) "${snapshot.petRarityLabel} " else ""
                 views.setTextViewText(
                     R.id.pet_meta,
-                    "$rarityPrefix${snapshot.petElementLabel} • Wpn T${snapshot.petFoodLevel} • Arm T${snapshot.petGearLevel}"
+                    "$rarityPrefix${snapshot.petElementLabel} • Stg ${snapshot.petStage} • Care $careLabel"
                 )
                 views.setTextViewText(
                     R.id.pet_xp_label,
@@ -374,7 +393,10 @@ class SolstridePetWidgetProvider : BaseSolstrideWidgetProvider() {
                 )
                 views.setProgressBar(R.id.pet_xp_progress, 100, snapshot.petXpPercent(), false)
                 views.setTextViewText(R.id.pet_synergy_line, "Synergy: ${snapshot.petBonusSummary}")
-                views.setTextViewText(R.id.pet_battle_log, snapshot.petLastBattleSummary)
+                views.setTextViewText(
+                    R.id.pet_battle_log,
+                    if (dailyExhausted) snapshot.dailyCareRestedMessage() else snapshot.petLastBattleSummary
+                )
             } else {
                 views.setTextViewText(R.id.pet_name, "🐾 Interactive Pet Arena")
                 views.setTextViewText(R.id.pet_meta, "No Companion Equipped • Visit Sanctuary")
@@ -388,16 +410,25 @@ class SolstridePetWidgetProvider : BaseSolstrideWidgetProvider() {
                 )
             }
 
-            if (locked) {
-                views.setTextViewText(R.id.pet_feed_btn, "🔒 LOCKED")
-                views.setInt(R.id.pet_feed_btn, "setBackgroundResource", R.drawable.widget_bg_alert_crimson)
-                views.setTextViewText(R.id.pet_fight_btn, "🔒 APP OPEN")
-                views.setInt(R.id.pet_fight_btn, "setBackgroundResource", R.drawable.widget_bg_alert_crimson)
-            } else {
-                views.setTextViewText(R.id.pet_feed_btn, "🍖 FEED (${WildPetBattleEngine.FEED_SOL_COIN_COST}c)")
-                views.setInt(R.id.pet_feed_btn, "setBackgroundResource", R.drawable.widget_bg_badge_emerald)
-                views.setTextViewText(R.id.pet_fight_btn, "⚔ WILD FIGHT (-1⚡)")
-                views.setInt(R.id.pet_fight_btn, "setBackgroundResource", R.drawable.widget_bg_badge_violet)
+            when {
+                dailyExhausted -> {
+                    views.setTextViewText(R.id.pet_feed_btn, "🌙 TOMORROW")
+                    views.setInt(R.id.pet_feed_btn, "setBackgroundResource", R.drawable.widget_bg_alert_crimson)
+                    views.setTextViewText(R.id.pet_fight_btn, "🌙 0/$dailyCap LEFT")
+                    views.setInt(R.id.pet_fight_btn, "setBackgroundResource", R.drawable.widget_bg_alert_crimson)
+                }
+                locked -> {
+                    views.setTextViewText(R.id.pet_feed_btn, "🔒 LOCKED")
+                    views.setInt(R.id.pet_feed_btn, "setBackgroundResource", R.drawable.widget_bg_alert_crimson)
+                    views.setTextViewText(R.id.pet_fight_btn, "🔒 APP OPEN")
+                    views.setInt(R.id.pet_fight_btn, "setBackgroundResource", R.drawable.widget_bg_alert_crimson)
+                }
+                else -> {
+                    views.setTextViewText(R.id.pet_feed_btn, "🍖 FEED (${WildPetBattleEngine.FEED_SOL_COIN_COST}c)")
+                    views.setInt(R.id.pet_feed_btn, "setBackgroundResource", R.drawable.widget_bg_badge_emerald)
+                    views.setTextViewText(R.id.pet_fight_btn, "⚔ WILD FIGHT (-1⚡)")
+                    views.setInt(R.id.pet_fight_btn, "setBackgroundResource", R.drawable.widget_bg_badge_violet)
+                }
             }
 
             views.setOnClickPendingIntent(

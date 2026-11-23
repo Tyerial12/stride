@@ -30,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Backpack
+import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.EmojiEvents
@@ -101,6 +102,7 @@ import com.example.ui.screens.InventoryScreen
 import com.example.ui.screens.LeaderboardScreen
 import com.example.ui.screens.MultiplayerScreen
 import com.example.ui.screens.PetsScreen
+import com.example.ui.screens.SlotMachineScreen
 import com.example.ui.theme.LocalSolstrideColors
 import com.example.ui.theme.SolstrideDisplayMode
 import com.example.widget.SolstrideWidgetType
@@ -187,6 +189,7 @@ fun SolstrideAppShell(
     val guilds by viewModel.guilds.collectAsStateWithLifecycle()
     val myGuild by viewModel.myGuild.collectAsStateWithLifecycle()
     val guildChatMessages by viewModel.guildChatMessages.collectAsStateWithLifecycle()
+    val slotMachineState by viewModel.slotMachineState.collectAsStateWithLifecycle()
 
     LaunchedEffect(pendingWidgetTab) {
         if (!pendingWidgetTab.isNullOrBlank()) {
@@ -377,6 +380,7 @@ fun SolstrideAppShell(
             NavItemSpec(SolstrideTab.BATTLE, "Combat", Icons.Filled.Shield),
             NavItemSpec(SolstrideTab.INVENTORY, "Hero", Icons.Filled.Backpack),
             NavItemSpec(SolstrideTab.PETS, "Pets", Icons.Filled.Pets),
+            NavItemSpec(SolstrideTab.SLOTS, "Slots", Icons.Filled.Casino),
             NavItemSpec(SolstrideTab.MULTIPLAYER, "Social", Icons.Filled.Groups)
         )
     }
@@ -405,6 +409,7 @@ fun SolstrideAppShell(
                                     SolstrideTab.BATTLE -> "Tactical Combat Arena"
                                     SolstrideTab.INVENTORY -> "Hero Gear, Craft, Build & Quests"
                                     SolstrideTab.PETS -> "Companion Roster & Management"
+                                    SolstrideTab.SLOTS -> "Sunhaven Fortune Wheel & Prize Vault"
                                     SolstrideTab.MULTIPLAYER, SolstrideTab.LEADERBOARD -> "Live Players, Chat, Duels & Ranks"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
@@ -553,7 +558,7 @@ fun SolstrideAppShell(
                 }
             },
             floatingActionButton = {
-                if (activeTab != SolstrideTab.MULTIPLAYER) {
+                if (activeTab != SolstrideTab.MULTIPLAYER && activeTab != SolstrideTab.SLOTS) {
                     ExtendedFloatingActionButton(
                         onClick = { triggerVoiceCommand() },
                         containerColor = MaterialTheme.colorScheme.primary,
@@ -795,6 +800,7 @@ fun SolstrideAppShell(
                                     onVisitTownPetStore = { viewModel.visitTownNpc(TownNpcRole.PET_STORE) },
                                     onPetCareAction = { pet, action -> viewModel.performPetCareAction(pet, action) },
                                     onEvolvePet = { pet, branch -> viewModel.evolvePet(pet, branch) },
+                                    bonusPetCareCharges = hardcoreState.bonusPetCareCharges,
                                     widgetSnapshot = widgetSnapshot,
                                     onPinPetWidget = {
                                         val result = SolstrideWidgetUpdater.requestPinWidget(
@@ -807,6 +813,19 @@ fun SolstrideAppShell(
                                             viewModel.showBannerMessage("Long-press your Home Screen → Widgets → Solstride → Pet Arena Widget.")
                                         }
                                     },
+                                    modifier = contentModifier
+                                )
+                                SolstrideTab.SLOTS -> SlotMachineScreen(
+                                    profile = profile,
+                                    equippedPet = equippedPet,
+                                    bonusPetCareCharges = hardcoreState.bonusPetCareCharges,
+                                    slotState = slotMachineState,
+                                    expeditionLocked = expeditionLocked,
+                                    onSpinRequested = { viewModel.spinSlotMachine() },
+                                    onWheelPegTick = { viewModel.triggerSlotWheelTick() },
+                                    onSpinRevealCompleted = { result -> viewModel.onSlotSpinRevealCompleted(result) },
+                                    onNavigateToPets = { viewModel.selectTab(SolstrideTab.PETS) },
+                                    onNavigateToVault = { viewModel.selectTab(SolstrideTab.INVENTORY) },
                                     modifier = contentModifier
                                 )
                                 SolstrideTab.INVENTORY -> InventoryScreen(

@@ -84,6 +84,7 @@ fun InteractivePetCareHabitatCard(
     petFoodCount: Long,
     onPetCareAction: (String) -> Unit,
     onVisitPipsPetStore: () -> Unit,
+    bonusCareCharges: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val form = pet.resolvedForm()
@@ -91,6 +92,8 @@ fun InteractivePetCareHabitatCard(
     val usedToday = if (pet.lastCareDateKey == todayKey) pet.dailyCareActions.toInt() else 0
     val dailyCap = PetEvolutionCatalog.DAILY_CARE_LIMIT
     val remainingCare = (dailyCap - usedToday).coerceAtLeast(0)
+    val safeBonusCare = bonusCareCharges.coerceAtLeast(0)
+    val totalCareAvailable = remainingCare + safeBonusCare
 
     val bounce = remember { Animatable(0f) }
     val heartBurst = remember { Animatable(0f) }
@@ -136,7 +139,8 @@ fun InteractivePetCareHabitatCard(
                     color = Color(form.auraHex).copy(alpha = 0.18f)
                 ) {
                     Text(
-                        text = "$remainingCare/$dailyCap Care Left",
+                        text = if (safeBonusCare > 0) "$remainingCare/$dailyCap + $safeBonusCare★ Care"
+                        else "$remainingCare/$dailyCap Care Left",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = Color(form.auraHex),
@@ -151,7 +155,7 @@ fun InteractivePetCareHabitatCard(
                     .fillMaxWidth()
                     .height(145.dp)
                     .clip(RoundedCornerShape(18.dp))
-                    .pointerInput(pet.petType, remainingCare) {
+                    .pointerInput(pet.petType, totalCareAvailable) {
                         detectTapGestures {
                             scope.launch {
                                 bounce.snapTo(1f)
@@ -228,7 +232,7 @@ fun InteractivePetCareHabitatCard(
             ) {
                 Button(
                     onClick = { onPetCareAction("TREAT_TOSS") },
-                    enabled = petFoodCount > 0L && remainingCare > 0,
+                    enabled = petFoodCount > 0L && totalCareAvailable > 0,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEA580C)),
                     modifier = Modifier
                         .weight(1f)
@@ -241,7 +245,7 @@ fun InteractivePetCareHabitatCard(
                 }
                 OutlinedButton(
                     onClick = { onPetCareAction("SPAR_DRILL") },
-                    enabled = remainingCare > 0,
+                    enabled = totalCareAvailable > 0,
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp)

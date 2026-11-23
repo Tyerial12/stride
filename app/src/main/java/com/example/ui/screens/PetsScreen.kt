@@ -99,6 +99,7 @@ fun PetsScreen(
     onVisitTownPetStore: () -> Unit = {},
     onPetCareAction: (OwnedPet, String) -> Unit = { _, _ -> },
     onEvolvePet: (OwnedPet, PetEvolutionBranch) -> Unit = { _, _ -> },
+    bonusPetCareCharges: Int = 0,
     widgetSnapshot: WidgetSnapshotState = WidgetSnapshotState(),
     onPinPetWidget: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -226,7 +227,8 @@ fun PetsScreen(
                     pet = equippedPet,
                     petFoodCount = profile.solCoins,
                     onPetCareAction = { actionType -> onPetCareAction(equippedPet, actionType) },
-                    onVisitPipsPetStore = onVisitTownPetStore
+                    onVisitPipsPetStore = onVisitTownPetStore,
+                    bonusCareCharges = bonusPetCareCharges
                 )
             }
             item {
@@ -497,6 +499,12 @@ private fun PetWidgetExclusiveArenaCard(
     onPinPetWidget: () -> Unit
 ) {
     val ext = LocalSolstrideColors.current
+    val remainingCare = widgetSnapshot.remainingDailyCare()
+    val bonusCare = widgetSnapshot.petBonusCareCharges.coerceAtLeast(0)
+    val dailyCap = widgetSnapshot.petDailyCareLimit.coerceAtLeast(1)
+    val dailyExhausted = widgetSnapshot.isDailyCareExhausted()
+    val careDisplay = if (bonusCare > 0) "$remainingCare/$dailyCap+$bonusCare★" else "$remainingCare/$dailyCap"
+
     SolstrideCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -527,7 +535,11 @@ private fun PetWidgetExclusiveArenaCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Feed with Sol Coins & fight Wild Pets right from your Home Screen",
+                        text = if (dailyExhausted) {
+                            "Daily Care complete ($dailyCap/$dailyCap) — resets tomorrow in app & widget"
+                        } else {
+                            "Shares $careDisplay Daily Care with Sanctuary • Feed & Wild Fight off-app"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -535,7 +547,7 @@ private fun PetWidgetExclusiveArenaCard(
             }
             Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
+                color = if (dailyExhausted) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
                 border = BorderStroke(1.dp, ext.borderStrong)
             ) {
                 Row(
@@ -545,15 +557,15 @@ private fun PetWidgetExclusiveArenaCard(
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Lock,
-                        contentDescription = "Widget locked while app is open",
+                        contentDescription = if (dailyExhausted) "Daily care limit reached" else "Widget locked while app is open",
                         modifier = Modifier.size(12.dp),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        tint = if (dailyExhausted) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
                     )
                     Text(
-                        text = "LOCKED IN-APP",
+                        text = if (dailyExhausted) "0/$dailyCap TOMORROW" else "LOCKED IN-APP",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        color = if (dailyExhausted) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
             }
@@ -572,12 +584,13 @@ private fun PetWidgetExclusiveArenaCard(
                 border = BorderStroke(1.dp, ext.borderSubtle)
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
-                    Text("MOOD", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("DAILY CARE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        text = "❤ ${widgetSnapshot.petMoodPct}%",
+                        text = if (dailyExhausted) "🌙 0/$dailyCap" else "❤ $careDisplay",
                         style = MaterialTheme.typography.titleSmall,
                         fontFamily = JetBrainsMonoFontFamily,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = if (dailyExhausted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                     )
                 }
             }
@@ -605,9 +618,9 @@ private fun PetWidgetExclusiveArenaCard(
                 border = BorderStroke(1.dp, ext.borderSubtle)
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
-                    Text("FEED COST", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("MOOD", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        text = "🪙 5 Coins",
+                        text = "${widgetSnapshot.petMoodPct}%",
                         style = MaterialTheme.typography.titleSmall,
                         fontFamily = JetBrainsMonoFontFamily,
                         fontWeight = FontWeight.Bold,
@@ -635,13 +648,17 @@ private fun PetWidgetExclusiveArenaCard(
 
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Last Widget Arena Log: ${widgetSnapshot.petLastBattleSummary}",
+            text = if (dailyExhausted) {
+                widgetSnapshot.dailyCareRestedMessage()
+            } else {
+                "Last Widget Arena Log: ${widgetSnapshot.petLastBattleSummary}"
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "• Walk 250 steps = +1 Wild Stamina • Walk 500 steps = +1 Free Treat • Auto-syncs XP, Level-Ups & Forge Ore when Solstride opens, then locks until app closes.",
+            text = "• Shares the $dailyCap/day Daily Care cap with the in-app Sanctuary • Walk 250 steps = +1 Wild Stamina • Auto-syncs XP, Bond XP, Daily Care & Forge Ore when Solstride opens.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -657,7 +674,7 @@ private fun PetWidgetExclusiveArenaCard(
             Icon(Icons.Filled.AddToHomeScreen, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-                if (equippedPet != null) "Pin ${equippedPet.resolvedType().displayName} Arena Widget"
+                if (equippedPet != null) "Pin ${equippedPet.resolvedForm().formName} Arena Widget"
                 else "Pin Pet Arena Widget to Home Screen"
             )
         }

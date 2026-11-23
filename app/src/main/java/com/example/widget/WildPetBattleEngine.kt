@@ -37,6 +37,8 @@ object WildPetBattleEngine {
     const val FEED_SOL_COIN_COST = 5L
     const val FEED_XP_GAIN = 35L
     const val FEED_MOOD_GAIN = 30
+    const val FEED_BOND_XP_GAIN = 26L
+    const val WILD_FIGHT_BOND_XP_GAIN = 32L
     const val MAX_WILD_STAMINA = 5
     const val STEPS_PER_STAMINA = 250L
     const val STEPS_PER_FREE_TREAT = 500L

@@ -1088,6 +1088,12 @@ private fun PetArenaWidgetPreview(
     onRefresh: () -> Unit,
     onTapPets: () -> Unit
 ) {
+    val remainingCare = snapshot.remainingDailyCare()
+    val bonusCare = snapshot.petBonusCareCharges.coerceAtLeast(0)
+    val dailyCap = snapshot.petDailyCareLimit.coerceAtLeast(1)
+    val dailyExhausted = snapshot.isDailyCareExhausted()
+    val careLabel = if (bonusCare > 0) "$remainingCare/$dailyCap+$bonusCare★" else "$remainingCare/$dailyCap"
+
     ThemedWidgetFrame(
         topColor = PetTop,
         bottomColor = PetBottom,
@@ -1114,7 +1120,7 @@ private fun PetArenaWidgetPreview(
                     val rarityPrefix = if (snapshot.petRarityLabel.isNotBlank()) "${snapshot.petRarityLabel} " else ""
                     Text(
                         text = if (snapshot.hasPet) {
-                            "$rarityPrefix${snapshot.petElementLabel} • Wpn T${snapshot.petFoodLevel} • Arm T${snapshot.petGearLevel}"
+                            "$rarityPrefix${snapshot.petElementLabel} • Stg ${snapshot.petStage} • Care $careLabel"
                         } else {
                             "No Companion Equipped • Visit Sanctuary"
                         },
@@ -1130,7 +1136,11 @@ private fun PetArenaWidgetPreview(
                     border = BorderStroke(1.dp, WidgetAccentPurple)
                 ) {
                     Text(
-                        text = "⚡ ${snapshot.petWildStamina}/${WildPetBattleEngine.MAX_WILD_STAMINA}",
+                        text = if (snapshot.hasPet) {
+                            "⚡ ${snapshot.petWildStamina}/${WildPetBattleEngine.MAX_WILD_STAMINA} • $careLabel"
+                        } else {
+                            "⚡ ${snapshot.petWildStamina}/${WildPetBattleEngine.MAX_WILD_STAMINA}"
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFFE9D5FF),
                         fontWeight = FontWeight.Bold,
@@ -1162,7 +1172,11 @@ private fun PetArenaWidgetPreview(
                 border = BorderStroke(1.dp, WidgetAlertStroke)
             ) {
                 Text(
-                    text = "🔒 APP OPEN — Close Solstride to Feed or Fight Wild Pets",
+                    text = if (dailyExhausted) {
+                        "🌙 DAILY LIMIT ($dailyCap/$dailyCap) — Resets Tomorrow!"
+                    } else {
+                        "🔒 APP OPEN — Close Solstride to Care ($careLabel Left)"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFFFFD6D6),
                     fontWeight = FontWeight.Bold,
@@ -1219,7 +1233,7 @@ private fun PetArenaWidgetPreview(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = snapshot.petLastBattleSummary,
+                        text = if (dailyExhausted) snapshot.dailyCareRestedMessage() else snapshot.petLastBattleSummary,
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFFDFD0F2),
                         maxLines = 1,
@@ -1236,13 +1250,13 @@ private fun PetArenaWidgetPreview(
                 Surface(
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(999.dp),
-                    color = Color(0xFF103626),
-                    border = BorderStroke(1.dp, WidgetAccentGreen)
+                    color = if (dailyExhausted) WidgetAlertBg else Color(0xFF103626),
+                    border = BorderStroke(1.dp, if (dailyExhausted) WidgetAlertStroke else WidgetAccentGreen)
                 ) {
                     Text(
-                        text = "🍖 FEED (5c)",
+                        text = if (dailyExhausted) "🌙 TOMORROW" else "🍖 FEED (${WildPetBattleEngine.FEED_SOL_COIN_COST}c)",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF6EE7B7),
+                        color = if (dailyExhausted) Color(0xFFFFD6D6) else Color(0xFF6EE7B7),
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
@@ -1253,13 +1267,13 @@ private fun PetArenaWidgetPreview(
                 Surface(
                     modifier = Modifier.weight(1.25f),
                     shape = RoundedCornerShape(999.dp),
-                    color = Color(0xFF311B4D),
-                    border = BorderStroke(1.dp, WidgetAccentPurple)
+                    color = if (dailyExhausted) WidgetAlertBg else Color(0xFF311B4D),
+                    border = BorderStroke(1.dp, if (dailyExhausted) WidgetAlertStroke else WidgetAccentPurple)
                 ) {
                     Text(
-                        text = "⚔ WILD FIGHT (-1⚡)",
+                        text = if (dailyExhausted) "🌙 0/$dailyCap LEFT" else "⚔ WILD FIGHT (-1⚡)",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFFF3E8FF),
+                        color = if (dailyExhausted) Color(0xFFFFD6D6) else Color(0xFFF3E8FF),
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),

@@ -110,6 +110,7 @@ class SolstridePreferences(private val context: Context) {
         val SLAYER_CONTRACT_STEPS_RAW = stringPreferencesKey("rpg_slayer_contract_steps_raw")
         val SLAYER_CONTRACT_KILLS_RAW = stringPreferencesKey("rpg_slayer_contract_kills_raw")
         val SLAYER_CONTRACTS_COMPLETED = intPreferencesKey("rpg_slayer_contracts_completed")
+        val BONUS_PET_CARE_CHARGES = intPreferencesKey("rpg_bonus_pet_care_charges")
     }
 
     val settingsFlow: Flow<SolstrideSettings> = context.solstrideDataStore.data.map { prefs ->
@@ -176,7 +177,8 @@ class SolstridePreferences(private val context: Context) {
             dungeonClearsCount = (prefs[Keys.DUNGEON_CLEARS_COUNT] ?: 0).coerceAtLeast(0),
             slayerContractStepsMap = parseKeyIntMap(prefs[Keys.SLAYER_CONTRACT_STEPS_RAW] ?: ""),
             slayerContractKillsMap = parseKeyIntMap(prefs[Keys.SLAYER_CONTRACT_KILLS_RAW] ?: ""),
-            slayerContractsCompleted = (prefs[Keys.SLAYER_CONTRACTS_COMPLETED] ?: 0).coerceAtLeast(0)
+            slayerContractsCompleted = (prefs[Keys.SLAYER_CONTRACTS_COMPLETED] ?: 0).coerceAtLeast(0),
+            bonusPetCareCharges = (prefs[Keys.BONUS_PET_CARE_CHARGES] ?: 0).coerceIn(0, 99)
         )
     }
 
@@ -275,6 +277,7 @@ class SolstridePreferences(private val context: Context) {
             prefs[Keys.SLAYER_CONTRACT_STEPS_RAW] = encodeKeyIntMap(next.slayerContractStepsMap)
             prefs[Keys.SLAYER_CONTRACT_KILLS_RAW] = encodeKeyIntMap(next.slayerContractKillsMap)
             prefs[Keys.SLAYER_CONTRACTS_COMPLETED] = next.slayerContractsCompleted.coerceAtLeast(0)
+            prefs[Keys.BONUS_PET_CARE_CHARGES] = next.bonusPetCareCharges.coerceIn(0, 99)
         }
     }
 
@@ -327,6 +330,7 @@ class SolstridePreferences(private val context: Context) {
             prefs[Keys.SLAYER_CONTRACT_STEPS_RAW] = ""
             prefs[Keys.SLAYER_CONTRACT_KILLS_RAW] = ""
             prefs[Keys.SLAYER_CONTRACTS_COMPLETED] = 0
+            prefs[Keys.BONUS_PET_CARE_CHARGES] = 0
         }
     }
 

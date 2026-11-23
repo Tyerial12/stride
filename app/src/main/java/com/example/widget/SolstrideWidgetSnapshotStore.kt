@@ -12,6 +12,7 @@ import com.example.data.model.InventoryItem
 import com.example.data.model.ItemSlot
 import com.example.data.model.OwnedPet
 import com.example.data.model.PetCatalog
+import com.example.data.model.PetEvolutionCatalog
 import com.example.data.model.currentCalendarDateKey
 import com.example.domain.ExpeditionEngine
 import com.example.domain.ProgressionEngine
@@ -23,6 +24,10 @@ import java.util.Locale
 data class PetWidgetLedger(
     val petId: String = "",
     val pendingPetXp: Long = 0L,
+    val pendingBondXp: Long = 0L,
+    val pendingCareActions: Int = 0,
+    val pendingCareDateKey: String = "",
+    val pendingBonusCareUsed: Int = 0,
     val pendingCoinsSpent: Long = 0L,
     val pendingOreWon: Long = 0L,
     val pendingEssenceWon: Long = 0L,
@@ -38,7 +43,8 @@ data class PetWidgetLedger(
     val lastWildBattleSummary: String = "Close app & tap Feed or Wild Fight to level your pet!"
 ) {
     fun hasPendingSync(): Boolean =
-        pendingPetXp > 0L || pendingCoinsSpent > 0L || pendingOreWon > 0L ||
+        pendingPetXp > 0L || pendingBondXp > 0L || pendingCareActions > 0 ||
+            pendingBonusCareUsed > 0 || pendingCoinsSpent > 0L || pendingOreWon > 0L ||
             pendingEssenceWon > 0L || pendingWildWins > 0 || pendingWildLosses > 0 || pendingFeeds > 0
 }
 
@@ -87,6 +93,12 @@ data class WidgetSnapshotState(
     val petTitle: String = "Visit Sanctuary",
     val petRarityLabel: String = "",
     val petLevel: Int = 1,
+    val petStage: Int = 1,
+    val petBondXp: Long = 0L,
+    val petDailyCareUsed: Int = 0,
+    val petDailyCareLimit: Int = PetEvolutionCatalog.DAILY_CARE_LIMIT,
+    val petLastCareDateKey: String = "",
+    val petBonusCareCharges: Int = 0,
     val petXp: Long = 0L,
     val petXpToNext: Long = 60L,
     val petElementSymbol: String = "🐾",
@@ -125,6 +137,27 @@ data class WidgetSnapshotState(
 
     fun petXpPercent(): Int =
         ((petXp.toFloat() / petXpToNext.coerceAtLeast(1L).toFloat()) * 100f).toInt().coerceIn(0, 100)
+
+    fun effectiveDailyCareUsed(todayKey: String = currentCalendarDateKey()): Int {
+        val cap = petDailyCareLimit.coerceAtLeast(1)
+        return if (petLastCareDateKey == todayKey) petDailyCareUsed.coerceIn(0, cap) else 0
+    }
+
+    fun remainingDailyCare(todayKey: String = currentCalendarDateKey()): Int {
+        val cap = petDailyCareLimit.coerceAtLeast(1)
+        return (cap - effectiveDailyCareUsed(todayKey)).coerceAtLeast(0)
+    }
+
+    fun totalRemainingCare(todayKey: String = currentCalendarDateKey()): Int =
+        remainingDailyCare(todayKey) + petBonusCareCharges.coerceAtLeast(0)
+
+    fun isDailyCareExhausted(todayKey: String = currentCalendarDateKey()): Boolean =
+        hasPet && totalRemainingCare(todayKey) <= 0
+
+    fun dailyCareRestedMessage(): String {
+        val cap = petDailyCareLimit.coerceAtLeast(1)
+        return "🌙 $petName is happily rested! Daily Care resets tomorrow ($cap/$cap)."
+    }
 
     fun hasHardcoreAlert(): Boolean =
         woundStacks > 0 || shatteredGearCount > 0 || lowestDurabilityPct < 30
@@ -315,6 +348,12 @@ object SolstrideWidgetSnapshotStore {
             .putString("petTitle", snapshot.petTitle)
             .putString("petRarityLabel", snapshot.petRarityLabel)
             .putInt("petLevel", snapshot.petLevel)
+            .putInt("petStage", snapshot.petStage)
+            .putLong("petBondXp", snapshot.petBondXp)
+            .putInt("petDailyCareUsed", snapshot.petDailyCareUsed)
+            .putInt("petDailyCareLimit", snapshot.petDailyCareLimit)
+            .putString("petLastCareDateKey", snapshot.petLastCareDateKey)
+            .putInt("petBonusCareCharges", snapshot.petBonusCareCharges.coerceIn(0, 99))
             .putLong("petXp", snapshot.petXp)
             .putLong("petXpToNext", snapshot.petXpToNext)
             .putString("petElementSymbol", snapshot.petElementSymbol)
@@ -350,11 +389,33 @@ object SolstrideWidgetSnapshotStore {
         val baseCoins = p.getLong("solCoins", 20L)
         val basePetLevel = p.getInt("petLevel", 1)
         val basePetXp = p.getLong("petXp", 0L)
+        val savedPetId = p.getString("petId", "") ?: ""
+        val ledgerMatchesPet = ledger.petId.isBlank() || savedPetId.isBlank() || ledger.petId == savedPetId
         val previewProg = WildPetBattleEngine.computePreviewProgression(
             baseLevel = basePetLevel,
             baseXp = basePetXp,
-            addedXp = ledger.pendingPetXp
+            addedXp = if (ledgerMatchesPet) ledger.pendingPetXp else 0L
         )
+        val todayKey = currentCalendarDateKey()
+        val dailyCareLimit = p.getInt("petDailyCareLimit", PetEvolutionCatalog.DAILY_CARE_LIMIT).coerceAtLeast(1)
+        val savedCareDateKey = p.getString("petLastCareDateKey", "") ?: ""
+        val baseCareUsed = if (savedCareDateKey == todayKey) {
+            p.getInt("petDailyCareUsed", 0).coerceIn(0, dailyCareLimit)
+        } else {
+            0
+        }
+        val pendingCareToday = if (ledgerMatchesPet && ledger.pendingCareDateKey == todayKey) {
+            ledger.pendingCareActions.coerceAtLeast(0)
+        } else {
+            0
+        }
+        val effectiveDailyCareUsed = (baseCareUsed + pendingCareToday).coerceIn(0, dailyCareLimit)
+        val effectiveCareDateKey = if (effectiveDailyCareUsed > 0) todayKey else savedCareDateKey
+        val effectiveBonusCareCharges = (p.getInt("petBonusCareCharges", 0).coerceIn(0, 99) - ledger.pendingBonusCareUsed)
+            .coerceAtLeast(0)
+        val effectiveBondXp = (p.getLong("petBondXp", 0L).coerceAtLeast(0L) +
+            if (ledgerMatchesPet) ledger.pendingBondXp else 0L)
+            .coerceAtMost(PetEvolutionCatalog.MAX_BOND_XP)
         val todayStepsVal = p.getLong("todaySteps", 0L)
         val stepsTowardNext = (todayStepsVal - ledger.lastStaminaStepCount).coerceAtLeast(0L) % WildPetBattleEngine.STEPS_PER_STAMINA
         val computedStepsToNextStamina = (WildPetBattleEngine.STEPS_PER_STAMINA - stepsTowardNext).toInt().coerceIn(1, WildPetBattleEngine.STEPS_PER_STAMINA.toInt())
@@ -398,11 +459,17 @@ object SolstrideWidgetSnapshotStore {
             lastCompletedSleepMinutes = p.getLong("lastCompletedSleepMinutes", 0L),
             isAppForegroundLocked = p.getBoolean("isAppForegroundLocked", false),
             hasPet = p.getBoolean("hasPet", false),
-            petId = p.getString("petId", "") ?: "",
+            petId = savedPetId,
             petName = p.getString("petName", "No Companion") ?: "No Companion",
             petTitle = p.getString("petTitle", "Visit Sanctuary") ?: "Visit Sanctuary",
             petRarityLabel = p.getString("petRarityLabel", "") ?: "",
             petLevel = previewProg.level,
+            petStage = p.getInt("petStage", 1).coerceIn(1, 3),
+            petBondXp = effectiveBondXp,
+            petDailyCareUsed = effectiveDailyCareUsed,
+            petDailyCareLimit = dailyCareLimit,
+            petLastCareDateKey = effectiveCareDateKey,
+            petBonusCareCharges = effectiveBonusCareCharges,
             petXp = previewProg.xp,
             petXpToNext = previewProg.xpToNext,
             petElementSymbol = p.getString("petElementSymbol", "🐾") ?: "🐾",
@@ -439,6 +506,10 @@ object SolstrideWidgetSnapshotStore {
         return PetWidgetLedger(
             petId = p.getString("ledger_petId", "") ?: "",
             pendingPetXp = p.getLong("ledger_pendingPetXp", 0L).coerceAtLeast(0L),
+            pendingBondXp = p.getLong("ledger_pendingBondXp", 0L).coerceAtLeast(0L),
+            pendingCareActions = p.getInt("ledger_pendingCareActions", 0).coerceAtLeast(0),
+            pendingCareDateKey = p.getString("ledger_pendingCareDateKey", "") ?: "",
+            pendingBonusCareUsed = p.getInt("ledger_pendingBonusCareUsed", 0).coerceAtLeast(0),
             pendingCoinsSpent = p.getLong("ledger_pendingCoinsSpent", 0L).coerceAtLeast(0L),
             pendingOreWon = p.getLong("ledger_pendingOreWon", 0L).coerceAtLeast(0L),
             pendingEssenceWon = p.getLong("ledger_pendingEssenceWon", 0L).coerceAtLeast(0L),
@@ -463,6 +534,10 @@ object SolstrideWidgetSnapshotStore {
         p.edit()
             .putString("ledger_petId", ledger.petId)
             .putLong("ledger_pendingPetXp", ledger.pendingPetXp.coerceAtLeast(0L))
+            .putLong("ledger_pendingBondXp", ledger.pendingBondXp.coerceAtLeast(0L))
+            .putInt("ledger_pendingCareActions", ledger.pendingCareActions.coerceAtLeast(0))
+            .putString("ledger_pendingCareDateKey", ledger.pendingCareDateKey)
+            .putInt("ledger_pendingBonusCareUsed", ledger.pendingBonusCareUsed.coerceAtLeast(0))
             .putLong("ledger_pendingCoinsSpent", ledger.pendingCoinsSpent.coerceAtLeast(0L))
             .putLong("ledger_pendingOreWon", ledger.pendingOreWon.coerceAtLeast(0L))
             .putLong("ledger_pendingEssenceWon", ledger.pendingEssenceWon.coerceAtLeast(0L))
@@ -486,6 +561,10 @@ object SolstrideWidgetSnapshotStore {
             context,
             cur.copy(
                 pendingPetXp = 0L,
+                pendingBondXp = 0L,
+                pendingCareActions = 0,
+                pendingCareDateKey = "",
+                pendingBonusCareUsed = 0,
                 pendingCoinsSpent = 0L,
                 pendingOreWon = 0L,
                 pendingEssenceWon = 0L,
@@ -494,6 +573,18 @@ object SolstrideWidgetSnapshotStore {
                 pendingFeeds = 0
             )
         )
+    }
+
+    fun grantBonusWildStamina(context: Context, amount: Int) {
+        if (amount <= 0) return
+        val cur = readPetLedger(context)
+        savePetLedger(
+            context,
+            cur.copy(
+                petWildStamina = (cur.petWildStamina + amount).coerceAtMost(WildPetBattleEngine.MAX_WILD_STAMINA)
+            )
+        )
+        SolstrideWidgetUpdater.updateAllWidgets(context)
     }
 
     fun resetPetLedgerForNewGame(context: Context) {
@@ -572,8 +663,9 @@ object SolstrideWidgetSnapshotStore {
     }
 
     /**
-     * Direct Home Screen Widget FEED action — ONLY works while Solstride app is closed!
-     * Always spends 5 Sol Coins to boost Mood & award Pet XP.
+     * Direct Home Screen Widget FEED action — ONLY works while Solstride app is closed
+     * and shares the exact same Daily Care limit (4/day) as the in-app Pet Sanctuary!
+     * Always spends 5 Sol Coins to boost Mood, Bond XP & Pet XP.
      */
     fun performWidgetFeedAction(context: Context): Boolean {
         if (isAppForegroundLocked(context)) return false
@@ -581,6 +673,16 @@ object SolstrideWidgetSnapshotStore {
         if (!snapshot.hasPet) return false
 
         val ledger = readPetLedger(context)
+        val todayKey = currentCalendarDateKey()
+        if (snapshot.isDailyCareExhausted(todayKey)) {
+            savePetLedger(
+                context,
+                ledger.copy(lastWildBattleSummary = snapshot.dailyCareRestedMessage())
+            )
+            SolstrideWidgetUpdater.updateAllWidgets(context)
+            return false
+        }
+
         if (snapshot.solCoins < WildPetBattleEngine.FEED_SOL_COIN_COST) {
             savePetLedger(
                 context,
@@ -594,7 +696,23 @@ object SolstrideWidgetSnapshotStore {
 
         val newMood = (ledger.petMoodPct + WildPetBattleEngine.FEED_MOOD_GAIN).coerceAtMost(100)
         val newPendingXp = ledger.pendingPetXp + WildPetBattleEngine.FEED_XP_GAIN
+        val newPendingBondXp = ledger.pendingBondXp + WildPetBattleEngine.FEED_BOND_XP_GAIN
         val newPendingCoins = ledger.pendingCoinsSpent + WildPetBattleEngine.FEED_SOL_COIN_COST
+        val useBonusCharge = snapshot.remainingDailyCare(todayKey) <= 0
+        val samePetAndDay = ledger.pendingCareDateKey == todayKey &&
+            (ledger.petId.isBlank() || snapshot.petId.isBlank() || ledger.petId == snapshot.petId)
+        val nextPendingCare = if (useBonusCharge) {
+            if (samePetAndDay) ledger.pendingCareActions else 0
+        } else {
+            (if (samePetAndDay) ledger.pendingCareActions else 0) + 1
+        }
+        val nextPendingCareDate = if (useBonusCharge) {
+            ledger.pendingCareDateKey
+        } else {
+            todayKey
+        }
+        val nextPendingBonusUsed = ledger.pendingBonusCareUsed + (if (useBonusCharge) 1 else 0)
+        val totalRemainingAfter = (snapshot.totalRemainingCare(todayKey) - 1).coerceAtLeast(0)
 
         val basePrefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val prevLevel = snapshot.petLevel
@@ -604,13 +722,23 @@ object SolstrideWidgetSnapshotStore {
             addedXp = newPendingXp
         )
         val lvlUpTag = if (previewAfter.level > prevLevel) " ★ LV.${previewAfter.level}!" else ""
-        val summary = "🍖 Fed ${snapshot.petName} (-${WildPetBattleEngine.FEED_SOL_COIN_COST} Sol Coins)! +${WildPetBattleEngine.FEED_XP_GAIN} XP$lvlUpTag • Mood $newMood%"
+        val careSuffix = when {
+            useBonusCharge && totalRemainingAfter <= 0 -> " • Used Bonus Care (0 left)"
+            useBonusCharge -> " • Used Bonus Care ($totalRemainingAfter bonus left)"
+            totalRemainingAfter <= 0 -> " • Limit (${snapshot.petDailyCareLimit}/${snapshot.petDailyCareLimit}), resets tomorrow!"
+            else -> " • $totalRemainingAfter care left"
+        }
+        val summary = "🍖 Fed ${snapshot.petName} (-${WildPetBattleEngine.FEED_SOL_COIN_COST}c)! +${WildPetBattleEngine.FEED_XP_GAIN} XP$lvlUpTag$careSuffix"
 
         savePetLedger(
             context,
             ledger.copy(
                 petId = snapshot.petId.ifBlank { ledger.petId },
                 pendingPetXp = newPendingXp,
+                pendingBondXp = newPendingBondXp,
+                pendingCareActions = nextPendingCare,
+                pendingCareDateKey = nextPendingCareDate,
+                pendingBonusCareUsed = nextPendingBonusUsed,
                 pendingCoinsSpent = newPendingCoins,
                 pendingFeeds = ledger.pendingFeeds + 1,
                 petMoodPct = newMood,
@@ -623,8 +751,9 @@ object SolstrideWidgetSnapshotStore {
     }
 
     /**
-     * Direct Home Screen Widget WILD FIGHT action — ONLY works while Solstride app is closed!
-     * Spends 1 step-recharged Wild Stamina to battle a wild pet for exclusive Pet XP & Forge Materials.
+     * Direct Home Screen Widget WILD FIGHT action — ONLY works while Solstride app is closed
+     * and shares the exact same Daily Care limit (4/day) as the in-app Pet Sanctuary!
+     * Spends 1 step-recharged Wild Stamina to battle a wild pet for Pet XP, Bond XP & Forge Materials.
      */
     fun performWidgetWildFightAction(context: Context): Boolean {
         if (isAppForegroundLocked(context)) return false
@@ -632,6 +761,16 @@ object SolstrideWidgetSnapshotStore {
         if (!snapshot.hasPet) return false
 
         val ledger = readPetLedger(context)
+        val todayKey = currentCalendarDateKey()
+        if (snapshot.isDailyCareExhausted(todayKey)) {
+            savePetLedger(
+                context,
+                ledger.copy(lastWildBattleSummary = snapshot.dailyCareRestedMessage())
+            )
+            SolstrideWidgetUpdater.updateAllWidgets(context)
+            return false
+        }
+
         if (ledger.petWildStamina <= 0) {
             savePetLedger(
                 context,
@@ -653,6 +792,23 @@ object SolstrideWidgetSnapshotStore {
         )
 
         val newPendingXp = ledger.pendingPetXp + outcome.xpGained
+        val newPendingBondXp = ledger.pendingBondXp + WildPetBattleEngine.WILD_FIGHT_BOND_XP_GAIN
+        val useBonusCharge = snapshot.remainingDailyCare(todayKey) <= 0
+        val samePetAndDay = ledger.pendingCareDateKey == todayKey &&
+            (ledger.petId.isBlank() || snapshot.petId.isBlank() || ledger.petId == snapshot.petId)
+        val nextPendingCare = if (useBonusCharge) {
+            if (samePetAndDay) ledger.pendingCareActions else 0
+        } else {
+            (if (samePetAndDay) ledger.pendingCareActions else 0) + 1
+        }
+        val nextPendingCareDate = if (useBonusCharge) {
+            ledger.pendingCareDateKey
+        } else {
+            todayKey
+        }
+        val nextPendingBonusUsed = ledger.pendingBonusCareUsed + (if (useBonusCharge) 1 else 0)
+        val totalRemainingAfter = (snapshot.totalRemainingCare(todayKey) - 1).coerceAtLeast(0)
+
         val basePrefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val prevLevel = snapshot.petLevel
         val previewAfter = WildPetBattleEngine.computePreviewProgression(
@@ -661,12 +817,22 @@ object SolstrideWidgetSnapshotStore {
             addedXp = newPendingXp
         )
         val lvlUpTag = if (previewAfter.level > prevLevel) " ★ LV.${previewAfter.level}!" else ""
+        val careSuffix = when {
+            useBonusCharge && totalRemainingAfter <= 0 -> " • Used Bonus Care (0 left)"
+            useBonusCharge -> " • Bonus Care ($totalRemainingAfter left)"
+            totalRemainingAfter <= 0 -> " • Limit (${snapshot.petDailyCareLimit}/${snapshot.petDailyCareLimit}), resets tomorrow!"
+            else -> " • $totalRemainingAfter left"
+        }
 
         savePetLedger(
             context,
             ledger.copy(
                 petId = snapshot.petId.ifBlank { ledger.petId },
                 pendingPetXp = newPendingXp,
+                pendingBondXp = newPendingBondXp,
+                pendingCareActions = nextPendingCare,
+                pendingCareDateKey = nextPendingCareDate,
+                pendingBonusCareUsed = nextPendingBonusUsed,
                 pendingOreWon = ledger.pendingOreWon + outcome.oreWon,
                 pendingEssenceWon = ledger.pendingEssenceWon + outcome.essenceWon,
                 pendingWildWins = ledger.pendingWildWins + (if (outcome.won) 1 else 0),
@@ -674,7 +840,7 @@ object SolstrideWidgetSnapshotStore {
                 totalWildWins = ledger.totalWildWins + (if (outcome.won) 1 else 0),
                 petWildStamina = (ledger.petWildStamina - 1).coerceAtLeast(0),
                 petMoodPct = (ledger.petMoodPct - 12).coerceAtLeast(15),
-                lastWildBattleSummary = "${outcome.summaryLine}$lvlUpTag"
+                lastWildBattleSummary = "${outcome.summaryLine}$lvlUpTag$careSuffix"
             )
         )
         SolstrideWidgetUpdater.updateAllWidgets(context)
@@ -768,7 +934,9 @@ object SolstrideWidgetSnapshotStore {
         rechargeWildStaminaAndTreats(context, todaySteps)
         val ledger = readPetLedger(context)
         val realm = ProgressionEngine.realmSpec(profile.currentRealm.toInt())
+        val todayKey = currentCalendarDateKey()
         val petType = equippedPet?.resolvedType()
+        val petForm = equippedPet?.resolvedForm()
         val petBonus = PetCatalog.computeBonus(equippedPet)
         val weaponTier = equippedPet?.equippedWeaponId?.let { PetCatalog.weaponById(it)?.tier } ?: 0
         val armorTier = equippedPet?.equippedArmorId?.let { PetCatalog.armorById(it)?.tier } ?: 0
@@ -776,12 +944,18 @@ object SolstrideWidgetSnapshotStore {
         val basePetXp = equippedPet?.xp?.coerceAtLeast(0L) ?: 0L
         val basePetXpNext = equippedPet?.xpToNextLevel?.coerceAtLeast(1L)
             ?: PetCatalog.xpRequiredForLevel(basePetLvl.toLong())
+        val baseDailyCareUsed = if (equippedPet != null && equippedPet.lastCareDateKey == todayKey) {
+            equippedPet.dailyCareActions.toInt().coerceIn(0, PetEvolutionCatalog.DAILY_CARE_LIMIT)
+        } else {
+            0
+        }
+        val baseCareDateKey = equippedPet?.lastCareDateKey.orEmpty()
 
         val equippedEquipment = inventory.filter { it.equipped && it.resolvedSlot().isEquipment }
         val equippedGearCount = equippedEquipment.size
         val equippedArmorSlots = equippedEquipment.count { it.resolvedSlot() != ItemSlot.WEAPON }
         val claimableQuests = runCatching {
-            ProgressionEngine.evaluateQuests(profile, currentCalendarDateKey()).count { it.canClaim }
+            ProgressionEngine.evaluateQuests(profile, todayKey).count { it.canClaim }
         }.getOrDefault(0)
         val stepsTowardNext = (todaySteps.coerceAtLeast(0L) - ledger.lastStaminaStepCount).coerceAtLeast(0L) %
             WildPetBattleEngine.STEPS_PER_STAMINA
@@ -830,10 +1004,16 @@ object SolstrideWidgetSnapshotStore {
             isAppForegroundLocked = isAppForegroundLocked,
             hasPet = equippedPet != null && petType != null,
             petId = equippedPet?.id?.ifBlank { petType?.name.orEmpty() } ?: "",
-            petName = petType?.displayName ?: "No Companion",
-            petTitle = petType?.title ?: "Adopt in Sanctuary",
+            petName = petForm?.formName ?: petType?.displayName ?: "No Companion",
+            petTitle = petForm?.title ?: petType?.title ?: "Adopt in Sanctuary",
             petRarityLabel = petType?.rarity?.label ?: "",
             petLevel = basePetLvl,
+            petStage = equippedPet?.resolvedStage() ?: 1,
+            petBondXp = equippedPet?.bondXp?.coerceAtLeast(0L) ?: 0L,
+            petDailyCareUsed = baseDailyCareUsed,
+            petDailyCareLimit = PetEvolutionCatalog.DAILY_CARE_LIMIT,
+            petLastCareDateKey = baseCareDateKey,
+            petBonusCareCharges = hardcoreState.bonusPetCareCharges.coerceIn(0, 99),
             petXp = basePetXp,
             petXpToNext = basePetXpNext,
             petElementSymbol = petType?.elementalAffinity?.symbol ?: "🐾",

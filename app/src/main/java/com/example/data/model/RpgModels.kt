@@ -779,7 +779,8 @@ data class HardcoreRpgState(
     val dungeonClearsCount: Int = 0,
     val slayerContractStepsMap: Map<String, Int> = emptyMap(),
     val slayerContractKillsMap: Map<String, Int> = emptyMap(),
-    val slayerContractsCompleted: Int = 0
+    val slayerContractsCompleted: Int = 0,
+    val bonusPetCareCharges: Int = 0
 ) {
     fun activeDreamTier(): DreamRestTier =
         DreamRestTier.fromId(activeDreamTierId)

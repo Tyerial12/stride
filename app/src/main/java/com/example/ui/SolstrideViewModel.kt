@@ -25,6 +25,7 @@ import com.example.data.model.ItemRarity
 import com.example.data.model.ItemSlot
 import com.example.data.model.LeaderboardEntry
 import com.example.data.model.LootChest
+import com.example.data.model.LootChestTier
 import com.example.data.model.MercenaryContractSpec
 import com.example.data.model.MultiplayerChatMessage
 import com.example.data.model.MultiplayerDuel
@@ -133,6 +134,7 @@ enum class SolstrideTab(val route: String) {
     EXPEDITION("expedition"),
     BATTLE("battle"),
     PETS("pets"),
+    SLOTS("slots"),
     INVENTORY("inventory"),
     MULTIPLAYER("multiplayer"),
     LEADERBOARD("leaderboard")
@@ -186,6 +188,10 @@ class SolstrideViewModel(
 
     private val _activeTab = MutableStateFlow(SolstrideTab.EXPEDITION)
     val activeTab: StateFlow<SolstrideTab> = _activeTab.asStateFlow()
+
+    private val slotSpinMutex = Mutex()
+    private val _slotMachineState = MutableStateFlow(com.example.domain.SlotMachineUiState())
+    val slotMachineState: StateFlow<com.example.domain.SlotMachineUiState> = _slotMachineState.asStateFlow()
 
     private val _battleMode = MutableStateFlow(BattleMode.REALM_CAMPAIGN)
     val battleMode: StateFlow<BattleMode> = _battleMode.asStateFlow()
@@ -1218,31 +1224,64 @@ class SolstrideViewModel(
 
             var leveledPetResult: OwnedPet? = targetPet
             var levelsGained = 0
-            if (targetPet != null && ledger.pendingPetXp > 0L) {
-                val leveled = PetCatalog.applyFoodXp(targetPet, ledger.pendingPetXp)
+            val todayKey = currentCalendarDateKey()
+            val addedCareToday = if (ledger.pendingCareDateKey == todayKey) {
+                ledger.pendingCareActions.coerceAtLeast(0)
+            } else {
+                0
+            }
+            if (targetPet != null && (ledger.pendingPetXp > 0L || ledger.pendingBondXp > 0L || addedCareToday > 0)) {
+                val leveled = if (ledger.pendingPetXp > 0L) {
+                    PetCatalog.applyFoodXp(targetPet, ledger.pendingPetXp)
+                } else {
+                    targetPet
+                }
                 levelsGained = (leveled.level - targetPet.level).toInt().coerceAtLeast(0)
+                val currentUsedToday = if (targetPet.lastCareDateKey == todayKey) {
+                    targetPet.dailyCareActions.toInt()
+                } else {
+                    0
+                }
+                val nextDailyCare = (currentUsedToday + addedCareToday)
+                    .coerceIn(0, PetEvolutionCatalog.DAILY_CARE_LIMIT)
+                    .toLong()
+                val nextCareDateKey = if (addedCareToday > 0) todayKey else targetPet.lastCareDateKey
+                val nextBondXp = (targetPet.bondXp + ledger.pendingBondXp)
+                    .coerceAtMost(PetEvolutionCatalog.MAX_BOND_XP)
+
                 val petDocId = targetPet.id.ifBlank { targetPet.petType }
+                val petUpdates = mutableMapOf<String, Any>(
+                    "level" to leveled.level,
+                    "xp" to leveled.xp,
+                    "xpToNextLevel" to leveled.xpToNextLevel,
+                    "bondXp" to nextBondXp
+                )
+                if (addedCareToday > 0) {
+                    petUpdates["lastCareDateKey"] = nextCareDateKey
+                    petUpdates["dailyCareActions"] = nextDailyCare
+                }
                 val petRes = repository.updateOwnedPet(
                     currentUserId,
                     petDocId,
-                    mapOf(
-                        "level" to leveled.level,
-                        "xp" to leveled.xp,
-                        "xpToNextLevel" to leveled.xpToNextLevel
-                    )
+                    petUpdates
                 )
                 if (petRes.isFailure) {
                     // Retry once connection returns — never drop queued widget XP!
                     return
                 }
-                leveledPetResult = leveled
+                leveledPetResult = leveled.copy(
+                    bondXp = nextBondXp,
+                    lastCareDateKey = nextCareDateKey,
+                    dailyCareActions = nextDailyCare
+                )
             }
 
-            if (ledger.pendingOreWon > 0L || ledger.pendingEssenceWon > 0L) {
+            if (ledger.pendingOreWon > 0L || ledger.pendingEssenceWon > 0L || ledger.pendingBonusCareUsed > 0) {
                 preferences.updateHardcoreRpgState { hc ->
                     hc.copy(
                         sunsteelOre = (hc.sunsteelOre + ledger.pendingOreWon).coerceAtMost(999_999L),
-                        elementalEssence = (hc.elementalEssence + ledger.pendingEssenceWon).coerceAtMost(999_999L)
+                        elementalEssence = (hc.elementalEssence + ledger.pendingEssenceWon).coerceAtMost(999_999L),
+                        bonusPetCareCharges = (hc.bonusPetCareCharges - ledger.pendingBonusCareUsed).coerceAtLeast(0)
                     )
                 }
             }
@@ -1273,10 +1312,14 @@ class SolstrideViewModel(
             syncLeaderboard(updatedProfile, updatedProfile.level, stats.computedHeroPower.toLong(), updatedProfile.bossesDefeated)
             com.example.widget.SolstrideWidgetSnapshotStore.clearPendingPetLedgerAfterSync(appContext)
 
-            val petName = leveledPetResult?.resolvedType()?.displayName ?: "Companion"
+            val petName = leveledPetResult?.resolvedForm()?.formName
+                ?: leveledPetResult?.resolvedType()?.displayName
+                ?: "Companion"
             val parts = mutableListOf<String>()
             if (ledger.pendingPetXp > 0L) parts.add("+${ledger.pendingPetXp} Pet XP")
+            if (ledger.pendingBondXp > 0L) parts.add("+${ledger.pendingBondXp} Bond XP")
             if (levelsGained > 0 && leveledPetResult != null) parts.add("★ Lv.${leveledPetResult.level}!")
+            if (addedCareToday > 0) parts.add("$addedCareToday Daily Care used")
             if (ledger.pendingWildWins > 0) parts.add("${ledger.pendingWildWins} Wild Win(s)")
             if (ledger.pendingOreWon > 0L) parts.add("+${ledger.pendingOreWon} Ore")
             if (ledger.pendingEssenceWon > 0L) parts.add("+${ledger.pendingEssenceWon} Essence")
@@ -4447,8 +4490,11 @@ class SolstrideViewModel(
         val todayKey = currentCalendarDateKey()
         val usedToday = if (pet.lastCareDateKey == todayKey) pet.dailyCareActions.toInt() else 0
         val dailyCap = PetEvolutionCatalog.DAILY_CARE_LIMIT
-        if (usedToday >= dailyCap) {
+        val availableBonusCharges = hardcoreState.value.bonusPetCareCharges.coerceAtLeast(0)
+        val consumingBonusCharge = usedToday >= dailyCap
+        if (consumingBonusCharge && availableBonusCharges <= 0) {
             _bannerMessage.value = "${pet.resolvedForm().formName} is happily rested! Daily Care resets tomorrow ($dailyCap/$dailyCap)."
+            com.example.widget.SolstrideWidgetUpdater.updateAllWidgets(appContext)
             return
         }
 
@@ -4478,24 +4524,29 @@ class SolstrideViewModel(
         }
         if (newLvl >= PetCatalog.MAX_PET_LEVEL) newXp = 0L
 
+        val nextDailyCount = if (consumingBonusCharge) usedToday.toLong() else (usedToday + 1).toLong()
         haptics.trigger(GameplayHaptic.SYNC_CONFIRM)
         viewModelScope.launch {
             repository.updateOwnedPet(
                 currentUserId,
-                pet.petType,
+                pet.id.ifBlank { pet.petType },
                 mapOf(
                     "level" to newLvl,
                     "xp" to newXp,
                     "xpToNextLevel" to needed,
                     "bondXp" to newBond,
                     "lastCareDateKey" to todayKey,
-                    "dailyCareActions" to (usedToday + 1).toLong()
+                    "dailyCareActions" to nextDailyCount
                 )
             )
             preferences.updateHardcoreRpgState { hc ->
                 val map = hc.activityMasteryXpMap.toMutableMap()
                 map[ActivityMasteryType.COMPANION.id] = (map[ActivityMasteryType.COMPANION.id] ?: 0) + 18
-                hc.copy(activityMasteryXpMap = map)
+                val nextBonus = if (consumingBonusCharge) (hc.bonusPetCareCharges - 1).coerceAtLeast(0) else hc.bonusPetCareCharges
+                hc.copy(
+                    activityMasteryXpMap = map,
+                    bonusPetCareCharges = nextBonus
+                )
             }
             repository.updateHeroProfile(
                 currentUserId,
@@ -4506,7 +4557,241 @@ class SolstrideViewModel(
                 "SPAR_DRILL" -> "Completed a Spar Drill"
                 else -> "Bonded with"
             }
-            _bannerMessage.value = "$verb ${pet.resolvedForm().formName}! +$bondGain Bond XP & +$basePetXp Pet XP (${usedToday + 1}/$dailyCap today)."
+            if (consumingBonusCharge) {
+                val bonusLeft = (availableBonusCharges - 1).coerceAtLeast(0)
+                _bannerMessage.value = "✨ Used Extra Pet Care! $verb ${pet.resolvedForm().formName}! +$bondGain Bond XP & +$basePetXp Pet XP ($bonusLeft bonus left)."
+            } else {
+                _bannerMessage.value = "$verb ${pet.resolvedForm().formName}! +$bondGain Bond XP & +$basePetXp Pet XP (${usedToday + 1}/$dailyCap today)."
+            }
+        }
+    }
+
+    fun triggerSlotWheelTick() {
+        haptics.trigger(GameplayHaptic.GUARD_BLOCK)
+    }
+
+    fun onSlotSpinRevealCompleted(result: com.example.domain.SlotSpinResult) {
+        haptics.trigger(
+            when {
+                result.isUltraRare -> GameplayHaptic.VICTORY_FANFARE
+                result.isJackpot -> GameplayHaptic.SOLAR_CRITICAL
+                else -> GameplayHaptic.SYNC_CONFIRM
+            }
+        )
+        _bannerMessage.value = "${result.prize.symbol} ${result.headline} — ${result.detailLine}"
+    }
+
+    fun spinSlotMachine() {
+        val profile = (heroProfileState.value as? UiState.Success)?.data ?: return
+        if (!requireCharacterAvailable(profile)) return
+        val cost = com.example.domain.SlotMachineCatalog.SPIN_COST_SOL_COINS
+        if (profile.solCoins < cost) {
+            _bannerMessage.value = "Need $cost Sol Coins to spin the Fortune Wheel (you have ${profile.solCoins})."
+            return
+        }
+
+        viewModelScope.launch {
+            slotSpinMutex.withLock {
+                val latestProfile = (heroProfileState.value as? UiState.Success)?.data ?: return@withLock
+                if (latestProfile.solCoins < cost) {
+                    _bannerMessage.value = "Need $cost Sol Coins to spin the Fortune Wheel."
+                    return@withLock
+                }
+
+                val (wedgeIndex, prize) = com.example.domain.SlotMachineCatalog.rollPrize()
+                val coinsAfterCost = (latestProfile.solCoins - cost).coerceAtLeast(0L)
+                val items = (inventoryState.value as? UiState.Success)?.data.orEmpty()
+                val activePet = equippedPet.value
+                val derived = computeDerivedStats(latestProfile, items, activePet, hardcoreState.value)
+
+                var headline = prize.title
+                var detailLine = prize.rewardSummary
+                var awardedItemName: String? = null
+                var awardedChestLabel: String? = null
+
+                val profileUpdates = mutableMapOf<String, Any>(
+                    "solCoins" to coinsAfterCost,
+                    "seasonXp" to (latestProfile.seasonXp + 20L).coerceAtMost(999_999L)
+                )
+
+                when (prize.id) {
+                    "ultra_pet_care_double", "ultra_pet_care_single" -> {
+                        val extraCharges = prize.bonusPetCareCharges.coerceAtLeast(1)
+                        val profileRes = repository.updateHeroProfile(currentUserId, profileUpdates)
+                        if (profileRes.isFailure) {
+                            _bannerMessage.value = "Could not complete spin — check connection and try again."
+                            return@withLock
+                        }
+                        preferences.updateHardcoreRpgState { hc ->
+                            hc.copy(bonusPetCareCharges = (hc.bonusPetCareCharges + extraCharges).coerceIn(0, 99))
+                        }
+                        com.example.widget.SolstrideWidgetSnapshotStore.grantBonusWildStamina(appContext, extraCharges)
+                        headline = "ULTRA RARE! +$extraCharges Extra Pet Care!"
+                        detailLine = "Added +$extraCharges Bonus Pet Care (bypasses 4/4 daily limit in Sanctuary & Widget) + $extraCharges Wild Stamina!"
+                    }
+                    "sunshard_coin_pouch" -> {
+                        profileUpdates["solCoins"] = coinsAfterCost + 20L
+                        profileUpdates["sunshards"] = (latestProfile.sunshards + 75L).coerceAtMost(999_999_999L)
+                        val profileRes = repository.updateHeroProfile(currentUserId, profileUpdates)
+                        if (profileRes.isFailure) {
+                            _bannerMessage.value = "Could not complete spin — check connection and try again."
+                            return@withLock
+                        }
+                        preferences.updateHardcoreRpgState { hc ->
+                            hc.copy(sunsteelOre = (hc.sunsteelOre + 8L).coerceAtMost(999_999L))
+                        }
+                        detailLine = "+75 Sunshards, +20 Sol Coins rebate & +8 Sunsteel Ore added to your Vault."
+                    }
+                    "starforged_cache" -> {
+                        val profileRes = repository.updateHeroProfile(currentUserId, profileUpdates)
+                        if (profileRes.isFailure) {
+                            _bannerMessage.value = "Could not complete spin — check connection and try again."
+                            return@withLock
+                        }
+                        preferences.updateHardcoreRpgState { hc ->
+                            hc.copy(
+                                starforgedIngots = (hc.starforgedIngots + 1L).coerceAtMost(999_999L),
+                                sunsteelOre = (hc.sunsteelOre + 12L).coerceAtMost(999_999L),
+                                elementalEssence = (hc.elementalEssence + 6L).coerceAtMost(999_999L)
+                            )
+                        }
+                        detailLine = "+1 Starforged Masterwork Ingot, +12 Sunsteel Ore & +6 Elemental Essence!"
+                    }
+                    "boss_vault_chest" -> {
+                        val chest = LootChest(
+                            userId = currentUserId,
+                            chestTier = LootChestTier.BOSS_VAULT.name,
+                            sourceLabel = "Fortune Wheel Boss Vault",
+                            heroLevelSnapshot = latestProfile.level.coerceAtLeast(1L),
+                            durationMinutes = 0L,
+                            ultraRareChancePct = 18L
+                        )
+                        val profileRes = repository.updateHeroProfile(currentUserId, profileUpdates)
+                        if (profileRes.isFailure) {
+                            _bannerMessage.value = "Could not complete spin — check connection and try again."
+                            return@withLock
+                        }
+                        repository.addLootChest(currentUserId, chest)
+                        awardedChestLabel = "Fortune Wheel Boss Vault"
+                        detailLine = "A Boss Vault Chest (18% Ultra Rare chance) is waiting in your Hero Vault!"
+                    }
+                    "sol_coin_jackpot" -> {
+                        profileUpdates["solCoins"] = coinsAfterCost + 150L
+                        profileUpdates["sunshards"] = (latestProfile.sunshards + 50L).coerceAtMost(999_999_999L)
+                        val profileRes = repository.updateHeroProfile(currentUserId, profileUpdates)
+                        if (profileRes.isFailure) {
+                            _bannerMessage.value = "Could not complete spin — check connection and try again."
+                            return@withLock
+                        }
+                        headline = "SOLAR JACKPOT! +150 Sol Coins!"
+                        detailLine = "Won +150 Sol Coins (net +100 profit!) & +50 Sunshards!"
+                    }
+                    "alchemist_dream_satchel" -> {
+                        val nextEnergy = (latestProfile.strideEnergy + 30L).coerceAtMost(derived.computedMaxEnergy.toLong())
+                        profileUpdates["sunshards"] = (latestProfile.sunshards + 40L).coerceAtMost(999_999_999L)
+                        profileUpdates["strideEnergy"] = nextEnergy
+                        val profileRes = repository.updateHeroProfile(currentUserId, profileUpdates)
+                        if (profileRes.isFailure) {
+                            _bannerMessage.value = "Could not complete spin — check connection and try again."
+                            return@withLock
+                        }
+                        preferences.updateHardcoreRpgState { hc ->
+                            hc.copy(
+                                aetherHerbs = (hc.aetherHerbs + 10L).coerceAtMost(999_999L),
+                                dreamShards = (hc.dreamShards + 4L).coerceAtMost(999_999L)
+                            )
+                        }
+                        detailLine = "+10 Aether Herbs, +4 Dream Shards, +30 Stride Energy & +40 Sunshards!"
+                    }
+                    "companion_bond_feast" -> {
+                        profileUpdates["evolutionShards"] = (latestProfile.evolutionShards + 1L).coerceAtMost(99999L)
+                        if (activePet == null) {
+                            profileUpdates["sunshards"] = (latestProfile.sunshards + 120L).coerceAtMost(999_999_999L)
+                        }
+                        val profileRes = repository.updateHeroProfile(currentUserId, profileUpdates)
+                        if (profileRes.isFailure) {
+                            _bannerMessage.value = "Could not complete spin — check connection and try again."
+                            return@withLock
+                        }
+                        if (activePet != null) {
+                            val leveled = PetCatalog.applyFoodXp(activePet, 85L)
+                            val newBond = (activePet.bondXp + 60L).coerceAtMost(PetEvolutionCatalog.MAX_BOND_XP)
+                            repository.updateOwnedPet(
+                                currentUserId,
+                                activePet.id.ifBlank { activePet.petType },
+                                mapOf(
+                                    "level" to leveled.level,
+                                    "xp" to leveled.xp,
+                                    "xpToNextLevel" to leveled.xpToNextLevel,
+                                    "bondXp" to newBond
+                                )
+                            )
+                            detailLine = "${activePet.resolvedForm().formName} gained +85 Pet XP, +60 Bond XP & +1 Evolution Shard!"
+                        } else {
+                            detailLine = "+1 Evolution Shard & +120 Sunshards (adopt a pet to feast on Bond XP)!"
+                        }
+                    }
+                    "forged_epic_gear" -> {
+                        val equipmentSlots = listOf(
+                            ItemSlot.WEAPON,
+                            ItemSlot.ARMOR,
+                            ItemSlot.HELM,
+                            ItemSlot.BOOTS,
+                            ItemSlot.RING,
+                            ItemSlot.RELIC
+                        )
+                        val chosenSlot = equipmentSlots[Random.nextInt(equipmentSlots.size)]
+                        val forged = ExpeditionEngine.forgeCustomEquipment(
+                            userId = currentUserId,
+                            slot = chosenSlot,
+                            tier = ForgeBlueprintTier.OBSIDIAN_MASTERWORK,
+                            heroLevel = latestProfile.level.toInt()
+                        )
+                        val profileRes = repository.updateHeroProfile(currentUserId, profileUpdates)
+                        if (profileRes.isFailure) {
+                            _bannerMessage.value = "Could not complete spin — check connection and try again."
+                            return@withLock
+                        }
+                        repository.addInventoryItem(currentUserId, forged)
+                        awardedItemName = forged.name
+                        headline = "Forged ${forged.name}!"
+                        detailLine = "${forged.resolvedRarity().label} ${chosenSlot.label} added straight to your Gear Bag!"
+                    }
+                    "mythic_evolution_relic" -> {
+                        profileUpdates["mythicCores"] = (latestProfile.mythicCores + 1L).coerceAtMost(9999L)
+                        profileUpdates["evolutionShards"] = (latestProfile.evolutionShards + 2L).coerceAtMost(99999L)
+                        val profileRes = repository.updateHeroProfile(currentUserId, profileUpdates)
+                        if (profileRes.isFailure) {
+                            _bannerMessage.value = "Could not complete spin — check connection and try again."
+                            return@withLock
+                        }
+                        detailLine = "+1 Mythic Core & +2 Evolution Shards added for Stage 2/3 Pet Evolution!"
+                    }
+                    else -> {
+                        val profileRes = repository.updateHeroProfile(currentUserId, profileUpdates)
+                        if (profileRes.isFailure) return@withLock
+                    }
+                }
+
+                haptics.trigger(GameplayHaptic.PLAYER_STRIKE)
+                val result = com.example.domain.SlotSpinResult(
+                    spinId = System.currentTimeMillis(),
+                    wedgeIndex = wedgeIndex,
+                    prize = prize,
+                    headline = headline,
+                    detailLine = detailLine,
+                    bonusPetCareGranted = prize.bonusPetCareCharges,
+                    awardedItemName = awardedItemName,
+                    awardedChestLabel = awardedChestLabel
+                )
+                val cur = _slotMachineState.value
+                _slotMachineState.value = cur.copy(
+                    lastResult = result,
+                    recentHistory = (listOf(result) + cur.recentHistory).take(10),
+                    totalSpinsThisSession = cur.totalSpinsThisSession + 1,
+                    ultraRareHitsThisSession = cur.ultraRareHitsThisSession + (if (result.isUltraRare) 1 else 0)
+                )
+            }
         }
     }
 

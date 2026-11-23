@@ -148,10 +148,10 @@ jobs:
         shell: bash
         run: |
           set -e
-          VERSION_NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
-          VERSION_CODE=$(grep -E 'versionCode\s*=' app/build.gradle.kts | head -n 1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')
-          VERSION_NAME="${VERSION_NAME:-25.0}"
-          VERSION_CODE="${VERSION_CODE:-25}"
+          VERSION_NAME=$(grep -E 'versionName[[:space:]]*=' app/build.gradle.kts | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' | tr -d '\r')
+          VERSION_CODE=$(grep -E 'versionCode[[:space:]]*=' app/build.gradle.kts | head -n 1 | sed -E 's/[^0-9]*([0-9]+).*/\1/' | tr -d '\r')
+          VERSION_NAME="${VERSION_NAME:-57.0}"
+          VERSION_CODE="${VERSION_CODE:-57}"
           APK_NAME="Solstride-v${VERSION_NAME}.apk"
           mkdir -p dist
           cp app/build/outputs/apk/debug/app-debug.apk "${APK_NAME}"
